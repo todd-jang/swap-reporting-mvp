@@ -1,0 +1,575 @@
+from fastapi import FastAPI, HTTPException, Query, Depends, Request, status # Import Request, status
+from fastapi.responses import HTMLResponse, RedirectResponse # Import RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials # For Bearer token security
+from typing import List, Dict, Any, Optional
+import uvicorn
+import httpx
+import os
+import jwt # For creating/verifying JWTs (install: pip install python-jose[cryptography])
+from datetime import datetime, timedelta
+
+# src.common에서 로거 가져오기
+from common.utils import logger, get_db # Import get_db
+
+# --- Configuration (read from Environment Variables) ---
+# Internal Service URLs (using Environment Variables injected by Kubernetes)
+ERROR_MONITOR_SERVICE_URL = os.environ.get("ERROR_MONITOR_SERVICE_URL", "http://localhost:8005")
+DATA_PROCESSING_SERVICE_URL = os.environ.get("DATA_PROCESSING_SERVICE_URL", "http://localhost:8001")
+REPORT_GENERATION_SERVICE_URL = os.environ.get("REPORT_GENERATION_SERVICE_URL", "http://localhost:8003")
+REPORT_SUBMISSION_SERVICE_URL = os.environ.get("REPORT_SUBMISSION_SERVICE_URL", "http://localhost:8004")
+
+# Kakao OAuth Configuration
+KAKAO_CLIENT_ID = os.environ.get("KAKAO_CLIENT_ID") # Your Kakao REST API Key
+KAKAO_CLIENT_SECRET = os.environ.get("KAKAO_CLIENT_SECRET") # Your Kakao Client Secret (REQUIRED for backend token exchange)
+KAKAO_REDIRECT_URI = os.environ.get("KAKAO_REDIRECT_URI", "http://localhost:8006/api/auth/kakao/callback") # Your backend redirect URI
+# In production, ensure this matches the URI configured in your Kakao Developer Console and is accessible via your Ingress/API Gateway.
+
+# Kakao Endpoints
+KAKAO_TOKEN_URL = '[https://kauth.kakao.com/oauth/token](https://kauth.kakao.com/oauth/token)'
+KAKAO_USER_INFO_URL = '[https://kapi.kakao.com/v2/user/me](https://kapi.kakao.com/v2/user/me)' # Example user info endpoint
+
+# Backend JWT Configuration (for issuing tokens to the frontend)
+JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY") # REQUIRED: A strong, random secret key for signing JWTs
+JWT_ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30 # Access token expiration time
+REFRESH_TOKEN_EXPIRE_DAYS = 7 # Refresh token expiration time (if implementing refresh)
+
+
+# --- FastAPI 앱 인스턴스 생성 ---
+app = FastAPI()
+
+# --- Serve static files (e.g., HTML, CSS, JS for the Admin UI frontend) ---
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+if os.path.exists(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    logger.info(f"Serving static files from {STATIC_DIR}")
+else:
+    logger.warning(f"Static directory not found at {STATIC_DIR}. Static files will not be served.")
+    # Create a dummy index.html for basic testing if static dir is missing
+    if not os.path.exists(os.path.join(os.path.dirname(__file__), "static")):
+         os.makedirs(os.path.join(os.path.dirname(__file__), "static"), exist_ok=True)
+         with open(os.path.join(os.path.dirname(__file__), "static", "index.html"), "w") as f:
+              f.write("<h1>Admin UI Frontend Not Built</h1><p>Run your frontend build process and place files in ./static</p>")
+         logger.info("Created dummy index.html")
+
+
+# --- Example HTML endpoint for the root (if serving a simple SPA) ---
+@app.get("/", response_class=HTMLResponse)
+async def read_root():
+    """
+    Serves the main HTML file for the Admin UI.
+    """
+    html_file_path = os.path.join(STATIC_DIR, "index.html")
+    if os.path.exists(html_file_path):
+        with open(html_file_path, "r") as f:
+            return f.read()
+    else:
+        # Fallback if static dir exists but index.html is missing
+        return "<h1>Swap Reporting MVP Admin UI Backend</h1><p>Frontend index.html not found in ./static.</p>"
+
+
+# --- Authentication Endpoints ---
+
+@app.get("/api/auth/kakao/callback")
+async def kakao_callback(request: Request, code: str = Query(...), state: str = Query(...)):
+    """
+    Endpoint to handle the redirect from Kakao after user authentication.
+    Exchanges the authorization code for tokens and issues a backend token.
+    """
+    logger.info(f"Received Kakao callback with code: {code}, state: {state}")
+
+    # TODO: Verify the 'state' parameter received from Kakao matches the one sent in the initial request
+    # This prevents CSRF attacks. The state should be stored securely on the backend or in a cookie.
+    # For simplicity, this example does not implement state verification.
+
+    # Retrieve the code_verifier from where it was stored (e.g., a secure cookie linked to the state)
+    # This is required for PKCE. For simplicity, this example assumes the frontend somehow provides it,
+    # but in a secure implementation, the backend must store and retrieve it based on the state.
+    # Example (conceptual - NOT SECURE): code_verifier = request.cookies.get('code_verifier')
+
+    # --- Exchange Authorization Code for Tokens with Kakao ---
+    token_exchange_payload = {
+        'grant_type': 'authorization_code',
+        'client_id': KAKAO_CLIENT_ID,
+        'redirect_uri': KAKAO_REDIRECT_URI,
+        'code': code,
+        # 'client_secret': KAKAO_CLIENT_SECRET, # Required if not using PKCE or if required by Kakao setup
+        # 'code_verifier': code_verifier, # Required for PKCE
+    }
+
+    if not KAKAO_CLIENT_ID or not KAKAO_CLIENT_SECRET:
+         logger.error("Kakao client ID or secret not configured for token exchange.")
+         send_alert("Critical", "Kakao client ID/secret missing for token exchange", {"module": "web", "endpoint": "/api/auth/kakao/callback"})
+         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Authentication configuration error")
+
+    try:
+        async with httpx.AsyncClient() as client:
+            token_response = await client.post(KAKAO_TOKEN_URL, data=token_exchange_payload)
+            token_response.raise_for_status() # Raise for bad status codes
+            kakao_tokens = token_response.json()
+            logger.info("Successfully exchanged authorization code for Kakao tokens.")
+            # logger.debug(f"Kakao Tokens: {kakao_tokens}") # Avoid logging sensitive tokens in production
+
+            access_token = kakao_tokens.get('access_token')
+            id_token = kakao_tokens.get('id_token')
+            # refresh_token = kakao_tokens.get('refresh_token') # Store securely if implementing refresh
+
+            if not access_token or not id_token:
+                 logger.error("Kakao token exchange did not return required tokens.")
+                 send_alert("Error", "Kakao token exchange failed - missing tokens", {"module": "web", "endpoint": "/api/auth/kakao/callback"})
+                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get tokens from Kakao")
+
+            # --- Validate ID Token and Get User Info (Optional but Recommended) ---
+            # Validate the ID token to verify user identity and get basic profile info
+            # This typically involves verifying the signature, issuer, audience, etc.
+            # For simplicity, this example skips ID token validation and fetches user info directly.
+            # In a real app, you MUST validate the ID token.
+
+            user_info = None
+            try:
+                async with httpx.AsyncClient() as client:
+                    user_info_response = await client.get(
+                        KAKAO_USER_INFO_URL,
+                        headers={'Authorization': f'Bearer {access_token}'}
+                    )
+                    user_info_response.raise_for_status()
+                    user_info = user_info_response.json()
+                    logger.info(f"Successfully fetched user info from Kakao for user ID: {user_info.get('id')}")
+                    # logger.debug(f"Kakao User Info: {user_info}") # Avoid logging sensitive info
+
+            except httpx.RequestError as exc:
+                logger.error(f"Failed to fetch user info from Kakao: {exc}", exc_info=True)
+                send_alert("Error", f"Failed to fetch Kakao user info: {exc}", {"module": "web", "endpoint": "/api/auth/kakao/callback"})
+                # Decide if this is a critical failure or if you can proceed with just ID token claims
+                # For now, treat as failure
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fetch user info from Kakao")
+
+
+            # --- Issue Backend Token (JWT) to the Frontend ---
+            if not JWT_SECRET_KEY:
+                 logger.critical("JWT_SECRET_KEY environment variable is not set.")
+                 send_alert("Critical", "JWT_SECRET_KEY not configured", {"module": "web"})
+                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Backend security not configured")
+
+            # Create a payload for your backend JWT
+            # Include minimal necessary user info and claims (e.g., user ID, roles/permissions)
+            jwt_payload = {
+                "sub": str(user_info.get('id')), # Subject: Kakao User ID
+                "name": user_info.get('properties', {}).get('nickname'), # Example: Kakao nickname
+                "email": user_info.get('kakao_account', {}).get('email'), # Example: Kakao email (if scope granted)
+                # TODO: Add internal application-specific roles or permissions here based on user ID
+                "roles": ["admin"], # Example: Grant 'admin' role to all authenticated users for now
+                "exp": datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES), # Expiration time
+                "iat": datetime.utcnow(), # Issued at time
+            }
+
+            backend_access_token = jwt.encode(jwt_payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+            logger.info(f"Issued backend JWT for user ID: {user_info.get('id')}")
+
+            # --- Redirect Frontend Back to Admin UI (e.g., Dashboard) ---
+            # Pass the backend token to the frontend (e.g., in a query parameter or cookie)
+            # Using a query parameter for simplicity in this example, frontend reads it and stores it.
+            # A more secure approach is to set an HTTP-only cookie.
+            redirect_to_ui_url = f"http://localhost:3000/?token={backend_access_token}" # Redirect to frontend root with token
+            # In production, replace http://localhost:3000 with your actual Admin UI URL
+
+            return RedirectResponse(url=redirect_to_ui_url, status_code=status.HTTP_302_FOUND)
+
+
+    except httpx.RequestError as exc:
+        logger.error(f"HTTP error during Kakao token exchange: {exc}", exc_info=True)
+        send_alert("Error", f"Kakao token exchange failed: {exc}", {"module": "web", "endpoint": "/api/auth/kakao/callback"})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to exchange code with Kakao: {exc}")
+    except httpx.HTTPStatusError as exc:
+        logger.error(f"Kakao token exchange returned error status {exc.response.status_code}: {exc.response.text}", exc_info=True)
+        send_alert("Error", f"Kakao token exchange failed with status {exc.response.status_code}", {"module": "web", "endpoint": "/api/auth/kakao/callback", "status": exc.response.status_code, "response": exc.response.text})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Kakao token exchange failed: {exc.response.status_code}")
+    except Exception as e:
+        logger.error(f"An unexpected error occurred during Kakao callback processing: {e}", exc_info=True)
+        send_alert("Critical", f"Unexpected error in Kakao callback: {e}", {"module": "web", "endpoint": "/api/auth/kakao/callback", "error": str(e)})
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An unexpected error occurred: {e}")
+
+
+# --- Security Dependency for Protected Endpoints ---
+
+# Define a security scheme (HTTP Bearer token)
+security = HTTPBearer()
+
+# Dependency to get the current authenticated user based on the JWT
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """
+    Dependency to validate the JWT from the Authorization header
+    and return the user payload.
+    """
+    token = credentials.credentials # The JWT token
+
+    if not JWT_SECRET_KEY:
+         logger.critical("JWT_SECRET_KEY environment variable is not set for token verification.")
+         # In a real scenario, this check should ideally happen on startup
+         raise HTTPException(
+             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+             detail="Backend security not configured"
+         )
+
+    try:
+        # Decode and verify the JWT
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+
+        # Extract user information from the payload
+        user_id = payload.get("sub")
+        user_name = payload.get("name")
+        user_email = payload.get("email")
+        user_roles = payload.get("roles", []) # Get roles from token
+
+        if user_id is None:
+            logger.warning("JWT payload missing 'sub' (user ID).")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        # You can return a user object or dictionary
+        user = {"id": user_id, "name": user_name, "email": user_email, "roles": user_roles}
+        return user
+
+    except jwt.ExpiredSignatureError:
+        logger.warning("JWT has expired.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except jwt.InvalidTokenError:
+        logger.warning("Invalid JWT token.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error during token validation: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error during authentication",
+        )
+
+# Dependency to check for specific roles (Basic Authorization Example)
+def require_role(required_roles: List[str]):
+    def role_checker(current_user: Dict[str, Any] = Depends(get_current_user)):
+        user_roles = current_user.get("roles", [])
+        if not any(role in user_roles for role in required_roles):
+            logger.warning(f"User {current_user.get('id')} attempted to access forbidden resource. Roles: {user_roles}, Required: {required_roles}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not enough permissions"
+            )
+        return current_user # Return the user if authorized
+    return role_checker
+
+
+# --- API Endpoints for the Admin UI Frontend (Calling Other Modules) ---
+
+# Apply the security dependency to protected endpoints
+@app.get("/api/errors", dependencies=[Depends(require_role(["admin"]))]) # Example: require 'admin' role
+async def get_errors_for_ui(
+    # ... existing parameters ...
+    status: Optional[str] = Query(None, description="Filter by error status"),
+    source_module: Optional[str] = Query(None, description="Filter by source module"),
+    trade_id: Optional[str] = Query(None, description="Filter by trade ID or UTI (partial match)"),
+    limit: int = Query(100, description="Maximum number of errors to return"),
+    offset: int = Query(0, description="Offset for pagination"),
+    current_user: Dict[str, Any] = Depends(get_current_user) # Get current user info
+):
+    """
+    API endpoint for the Admin UI frontend to fetch error list.
+    Calls the Error Monitoring module's /errors endpoint. Requires authentication and 'admin' role.
+    """
+    logger.info(f"User {current_user.get('id')} fetching errors.")
+    # ... existing httpx call logic ...
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{ERROR_MONITOR_SERVICE_URL}/errors",
+                params={
+                    "status": status,
+                    "source_module": source_module,
+                    "trade_id": trade_id,
+                    "limit": limit,
+                    "offset": offset
+                },
+                timeout=30.0
+            )
+            response.raise_for_status()
+            logger.info("Successfully fetched errors from Error Monitoring module.")
+            return response.json()
+
+    except httpx.RequestError as exc:
+        logger.error(f"Failed to fetch errors from Error Monitoring module: {exc}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to fetch errors: {exc}")
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while fetching errors: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Unexpected error fetching errors: {e}")
+
+
+@app.get("/api/errors/{error_id}", dependencies=[Depends(require_role(["admin"]))]) # Example: require 'admin' role
+async def get_error_details_for_ui(error_id: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    API endpoint for the Admin UI frontend to fetch details of a specific error.
+    Calls the Error Monitoring module's /errors/{error_id} endpoint. Requires authentication and 'admin' role.
+    """
+    logger.info(f"User {current_user.get('id')} fetching error details for {error_id}.")
+    # ... existing httpx call logic ...
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{ERROR_MONITOR_SERVICE_URL}/errors/{error_id}",
+                timeout=30.0
+            )
+            response.raise_for_status()
+            logger.info(f"Successfully fetched error details for {error_id}.")
+            return response.json()
+
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Error not found")
+        logger.error(f"HTTP error fetching error details for {error_id}: {exc}", exc_info=True)
+        raise HTTPException(status_code=exc.response.status_code, detail=f"Failed to fetch error details: {exc.response.text}")
+    except httpx.RequestError as exc:
+        logger.error(f"Failed to fetch error details for {error_id}: {exc}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to fetch error details: {exc}")
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while fetching error details for {error_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Unexpected error fetching error details: {e}")
+
+
+@app.put("/api/errors/{error_id}/status", dependencies=[Depends(require_role(["admin"]))]) # Example: require 'admin' role
+async def update_error_status_for_ui(error_id: str, new_status: str, db: Session = Depends(get_db), current_user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    API endpoint for the Admin UI frontend to update the status of an error.
+    Calls the Error Monitoring module's /errors/{error_id}/status endpoint. Requires authentication and 'admin' role.
+    """
+    logger.info(f"User {current_user.get('id')} updating status for error {error_id} to {new_status}")
+    # TODO: Log the user action (who changed status, when) in the DB using the 'current_user' info
+    # ... existing httpx call logic ...
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.put(
+                f"{ERROR_MONITOR_SERVICE_URL}/errors/{error_id}/status",
+                params={"new_status": new_status},
+                timeout=30.0
+            )
+            response.raise_for_status()
+            logger.info(f"Successfully updated status for error {error_id}.")
+            return response.json()
+
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Error not found")
+        logger.error(f"HTTP error updating status for {error_id}: {exc}", exc_info=True)
+        raise HTTPException(status_code=exc.response.status_code, detail=f"Failed to update error status: {exc.response.text}")
+    except httpx.RequestError as exc:
+        logger.error(f"Failed to update status for error {error_id}: {exc}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to update error status: {exc}")
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while updating status for error {error_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Unexpected error updating status: {e}")
+
+
+@app.post("/api/errors/{error_id}/retry", dependencies=[Depends(require_role(["admin"]))]) # Example: require 'admin' role
+async def retry_error_processing_for_ui(error_id: str, db: Session = Depends(get_db), current_user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    API endpoint for the Admin UI frontend to trigger retry processing for an error.
+    Calls the Error Monitoring module's /errors/{error_id}/retry endpoint. Requires authentication and 'admin' role.
+    """
+    logger.info(f"User {current_user.get('id')} received request to retry processing for error {error_id}")
+    # TODO: Log the user action (who initiated retry, when) in the DB using the 'current_user' info
+    # ... existing httpx call logic ...
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{ERROR_MONITOR_SERVICE_URL}/errors/{error_id}/retry",
+                timeout=60.0
+            )
+            response.raise_for_status()
+            logger.info(f"Successfully initiated retry for error {error_id}.")
+            return response.json()
+
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Error not found")
+        logger.error(f"HTTP error initiating retry for {error_id}: {exc}", exc_info=True)
+        raise HTTPException(status_code=exc.response.status_code, detail=f"Failed to initiate retry: {exc.response.text}")
+    except httpx.RequestError as exc:
+        logger.error(f"Failed to initiate retry for error {error_id}: {exc}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to initiate retry: {exc}")
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while initiating retry for error {error_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Unexpected error initiating retry: {e}")
+
+# --- Add endpoints for querying other data (P3) ---
+
+@app.get("/api/processed-data", dependencies=[Depends(require_role(["admin"]))]) # Example: require 'admin' role
+async def get_processed_data_for_ui(
+    # ... existing parameters ...
+    limit: int = Query(100, description="Maximum number of records to return"),
+    offset: int = Query(0, description="Offset for pagination"),
+    uti: Optional[str] = Query(None, description="Filter by Unique Transaction Identifier (partial match)"),
+    status: Optional[str] = Query(None, description="Filter by validation status (e.g., Pending, Valid, Invalid)"),
+    asset_class: Optional[str] = Query(None, description="Filter by asset class"),
+    start_date: Optional[str] = Query(None, description="Filter by effective date >= (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="Filter by effective date <= (YYYY-MM-DD)"),
+    current_user: Dict[str, Any] = Depends(get_current_user) # Get current user info
+):
+    """
+    API endpoint for the Admin UI frontend to fetch processed data.
+    Calls the Data Processing module's API. Requires authentication and 'admin' role.
+    """
+    logger.info(f"User {current_user.get('id')} fetching processed data.")
+    # ... existing httpx call logic ...
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{DATA_PROCESSING_SERVICE_URL}/processed-data",
+                params={
+                    "limit": limit,
+                    "offset": offset,
+                    "uti": uti,
+                    "status": status,
+                    "asset_class": asset_class,
+                    "start_date": start_date,
+                    "end_date": end_date
+                },
+                timeout=30.0
+            )
+            response.raise_for_status()
+            logger.info("Successfully fetched processed data from Data Processing module.")
+            return response.json()
+
+    except httpx.RequestError as exc:
+        logger.error(f"Failed to fetch processed data from Data Processing module: {exc}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to fetch processed data: {exc}")
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while fetching processed data: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Unexpected error fetching processed data: {e}")
+
+@app.get("/api/reports", dependencies=[Depends(require_role(["admin"]))]) # Example: require 'admin' role
+async def get_reports_for_ui(
+    # ... existing parameters ...
+    limit: int = Query(100, description="Maximum number of records to return"),
+    offset: int = Query(0, description="Offset for pagination"),
+    filename: Optional[str] = Query(None, description="Filter by report filename (partial match)"),
+    status: Optional[str] = Query(None, description="Filter by report status (e.g., Generated, Submitted, SubmissionFailed)"),
+    current_user: Dict[str, Any] = Depends(get_current_user) # Get current user info
+):
+    """
+    API endpoint for the Admin UI frontend to fetch generated report info.
+    Calls the Report Generation module's API. Requires authentication and 'admin' role.
+    """
+    logger.info(f"User {current_user.get('id')} fetching reports.")
+    # ... existing httpx call logic ...
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{REPORT_GENERATION_SERVICE_URL}/reports",
+                params={
+                    "limit": limit,
+                    "offset": offset,
+                    "filename": filename,
+                    "status": status
+                },
+                timeout=30.0
+            )
+            response.raise_for_status()
+            logger.info("Successfully fetched reports from Report Generation module.")
+            return response.json()
+
+    except httpx.RequestError as exc:
+        logger.error(f"Failed to fetch reports from Report Generation module: {exc}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to fetch reports: {exc}")
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while fetching reports: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Unexpected error fetching reports: {e}")
+
+@app.get("/api/submissions", dependencies=[Depends(require_role(["admin"]))]) # Example: require 'admin' role
+async def get_submissions_for_ui(
+    # ... existing parameters ...
+    limit: int = Query(100, description="Maximum number of records to return"),
+    offset: int = Query(0, description="Offset for pagination"),
+    submission_id: Optional[str] = Query(None, description="Filter by submission ID (partial match)"),
+    report_id: Optional[str] = Query(None, description="Filter by report ID"),
+    status: Optional[str] = Query(None, description="Filter by submission status (e.g., Pending, Submitted, Failed)"),
+    current_user: Dict[str, Any] = Depends(get_current_user) # Get current user info
+):
+    """
+    API endpoint for the Admin UI frontend to fetch submission history.
+    Calls the Report Submission module's API. Requires authentication and 'admin' role.
+    """
+    logger.info(f"User {current_user.get('id')} fetching submissions.")
+    # ... existing httpx call logic ...
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{REPORT_SUBMISSION_SERVICE_URL}/submissions",
+                params={
+                    "limit": limit,
+                    "offset": offset,
+                    "submission_id": submission_id,
+                    "report_id": report_id,
+                    "status": status
+                },
+                timeout=30.0
+            )
+            response.raise_for_status()
+            logger.info("Successfully fetched submissions from Report Submission module.")
+            return response.json()
+
+    except httpx.RequestError as exc:
+        logger.error(f"Failed to fetch submissions from Report Submission module: {exc}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to fetch submissions: {exc}")
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while fetching submissions: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Unexpected error fetching submissions: {e}")
+
+
+# Health check endpoint (can remain public or be protected)
+@app.get("/health")
+async def health_check(): # Removed DB dependency if health check should be available without DB
+    """
+    Health check endpoint for the Web module backend.
+    Checks connectivity to dependent services.
+    """
+    # This health check can remain public as it doesn't expose sensitive data,
+    # or you can add authentication if desired.
+    dependency_statuses = {}
+    services_to_check = {
+        "error_monitoring": ERROR_MONITOR_SERVICE_URL,
+        "data_processing": DATA_PROCESSING_SERVICE_URL,
+        "report_generation": REPORT_GENERATION_SERVICE_URL,
+        "report_submission": REPORT_SUBMISSION_SERVICE_URL,
+    }
+
+    async with httpx.AsyncClient() as client:
+        for service_name, url in services_to_check.items():
+            health_url = f"{url}/health" # Assuming all modules have a /health endpoint
+            try:
+                response = await client.get(health_url, timeout=5.0)
+                response.raise_for_status()
+                dependency_statuses[service_name] = response.json()
+            except Exception as e:
+                dependency_statuses[service_name] = {"status": "down", "error": str(e)}
+                logger.error(f"Health check failed for {service_name} ({health_url}): {e}")
+
+    overall_status = "ok" if all(s.get("status") == "ok" for s in dependency_statuses.values()) else "degraded"
+
+    return {"status": overall_status, "dependencies": dependency_statuses}
+
+# To run this module locally:
+# 1. Install jwt library: pip install python-jose[cryptography]
+# 2. Set environment variables for all dependent service URLs (ERROR_MONITOR_SERVICE_URL, etc.)
+#    Example (Linux/macOS): export ERROR_MONITOR_SERVICE_URL="http://localhost:8005"
+# 3. Set Kakao OAuth environment variables: KAKAO_CLIENT_ID, KAKAO_CLIENT_SECRET, KAKAO_REDIRECT_URI
+# 4. Set JWT_SECRET_KEY environment variable (generate a strong random string).
+# 5. Ensure the 'static' directory exists and contains your frontend build (index.html, etc.).
+# 6. Run uvicorn: uvicorn main:app --reload --port 8006
