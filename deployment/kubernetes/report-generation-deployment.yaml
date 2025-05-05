@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: report-generation-deployment
+  namespace: swap-reporting
+spec:
+  replicas: 2 # Run 2 instances
+  selector:
+    matchLabels:
+      app: report-generation
+  template:
+    metadata:
+      labels:
+        app: report-generation
+    spec:
+      containers:
+      - name: report-generation
+        image: your-docker-registry/report-generation:latest # Replace with your image
+        ports:
+        - containerPort: 8003
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: swap-reporting-config
+              key: DATABASE_URL
+        # S3 Configuration
+        - name: AWS_REGION
+          valueFrom:
+            configMapKeyRef:
+              name: swap-reporting-config
+              key: AWS_REGION
+        - name: S3_BUCKET_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: swap-reporting-config
+              key: S3_BUCKET_NAME
+        # S3 Credentials from Secret
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: swap-reporting-secrets
+              key: AWS_ACCESS_KEY_ID
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: swap-reporting-secrets
+              key: AWS_SECRET_ACCESS_KEY
+        # Configure downstream service URLs
+        - name: REPORT_SUBMISSION_MODULE_URL
+          value: http://report-submission-service:8004/submit-report
+        - name: ERROR_MONITOR_MODULE_URL
+          value: http://error-monitoring-service:8005/report_error
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi" # Might need more memory for report generation
+          limits:
+            cpu: "750m"
+            memory: "1Gi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8003
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8003
+          initialDelaySeconds: 15
+          periodSeconds: 10
