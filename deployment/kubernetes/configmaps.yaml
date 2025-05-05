@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: swap-reporting-config
+  namespace: swap-reporting
+data:
+  # Database Connection (if database is deployed within the cluster)
+  # Format for PostgreSQL: postgresql://$(DATABASE_USER):$(DATABASE_PASSWORD)@$(DATABASE_HOST):$(DATABASE_PORT)/$(DATABASE_NAME)
+  # Using $(...) syntax to reference secrets/other configmap values
+  DATABASE_URL: postgresql://$(DATABASE_USER):$(DATABASE_PASSWORD)@swap-reporting-db:5432/$(DATABASE_NAME) # Assumes internal DB service name 'swap-reporting-db'
+
+  # AWS S3 Configuration
+  AWS_REGION: us-east-1 # Your AWS region
+  S3_BUCKET_NAME: my-swap-reports-bucket # Your S3 bucket name
+  # S3_ENDPOINT_URL: http://minio.minio-namespace.svc.cluster.local:9000 # Example for internal MinIO
+
+  # SDR Configuration (if using HTTP API)
+  SDR_SUBMISSION_URL: https://api.sdr.example.com/submit # Actual SDR API endpoint
+
+  # SDR Configuration (if using SFTP) - Uncomment if needed
+  # SDR_SFTP_HOST: sftp.sdr.example.com
+  # SDR_SFTP_PORT: "22"
+  # SDR_SFTP_USER: your_sdr_user
+  # SDR_SFTP_REMOTE_PATH: "/upload"
+
+  # Internal Service URLs (Optional - Service DNS is preferred)
+  # ERROR_MONITOR_MODULE_URL: http://error-monitoring-service:8005/report_error # Example using Service DNS
+  # VALIDATION_MODULE_URL: http://validation-service:8002/validate # Example using Service DNS
+  # REPORT_GENERATION_MODULE_URL: http://report-generation-service:8003/generate-report # Example using Service DNS
+  # REPORT_SUBMISSION_MODULE_URL: http://report-submission-service:8004/submit-report # Example using Service DNS
+  # DATA_PROCESSING_MODULE_URL: http://data-processing-service:8001 # Example using Service DNS
+  # INGESTION_MODULE_URL: http://data-ingestion-service:8000/ingest # Example using Service DNS
+
