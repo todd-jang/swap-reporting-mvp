@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: swap-reporting-db
+  namespace: swap-reporting
+spec:
+  serviceName: "swap-reporting-db"
+  replicas: 1 # Typically 1 replica for a simple DB StatefulSet, or use a distributed DB
+  selector:
+    matchLabels:
+      app: swap-reporting-db
+  template:
+    metadata:
+      labels:
+        app: swap-reporting-db
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:13 # Use a specific, stable version
+        ports:
+        - containerPort: 5432
+          name: postgres
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: swap-reporting-secrets
+              key: DATABASE_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: swap-reporting-secrets
+              key: DATABASE_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: swap-reporting-secrets
+              key: DATABASE_NAME
+        volumeMounts:
+        - name: postgres-persistent-storage
+          mountPath: /var/lib/postgresql/data # Default data directory for PostgreSQL
+      volumes:
+      # Define an emptyDir volume for temporary testing (data is lost on pod restart)
+      # For persistence, use a PersistentVolumeClaim instead
+      # - name: postgres-persistent-storage
+      #   emptyDir: {}
+  volumeClaimTemplates: # Use volumeClaimTemplates for StatefulSets for persistent storage
+  - metadata:
+      name: postgres-persistent-storage
+    spec:
+      accessModes: [ "ReadWriteOnce" ] # This volume can be mounted as read-write by a single node
+      storageClassName: standard # Use a storage class provided by your cloud provider or cluster setup
+      resources:
+        requests:
+          storage: 5Gi # Request 5Gi of storage
+
