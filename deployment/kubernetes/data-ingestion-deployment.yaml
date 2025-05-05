@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-ingestion-deployment
+  namespace: swap-reporting
+spec:
+  replicas: 2 # Run 2 instances for high availability/scalability
+  selector:
+    matchLabels:
+      app: data-ingestion
+  template:
+    metadata:
+      labels:
+        app: data-ingestion
+    spec:
+      containers:
+      - name: data-ingestion
+        image: your-docker-registry/data-ingestion:latest # Replace with your image
+        ports:
+        - containerPort: 8000
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: swap-reporting-config
+              key: DATABASE_URL
+        # Configure downstream service URLs using Service DNS names
+        - name: PROCESSING_MODULE_URL
+          value: http://data-processing-service:8001/process
+        - name: ERROR_MONITOR_MODULE_URL
+          value: http://error-monitoring-service:8005/report_error
+        # Mount secrets if needed (e.g., for external data source credentials)
+        # - name: EXTERNAL_SOURCE_API_KEY
+        #   valueFrom:
+        #     secretKeyRef:
+        #       name: swap-reporting-secrets
+        #       key: EXTERNAL_SOURCE_API_KEY
+        resources:
+          requests:
+            cpu: "100m" # Request 100 millicores of CPU
+            memory: "128Mi" # Request 128 MiB of memory
+          limits:
+            cpu: "500m" # Limit CPU to 500 millicores
+            memory: "512Mi" # Limit memory to 512 MiB
+        livenessProbe: # Check if the container is still running
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        readinessProbe: # Check if the container is ready to serve traffic
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 10
