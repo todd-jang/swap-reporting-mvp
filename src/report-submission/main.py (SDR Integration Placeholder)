@@ -1,0 +1,508 @@
+# src/report-submission/main.py
+
+from fastapi import FastAPI, HTTPException, Depends, Query
+from typing import List, Dict, Any, Optional
+import uvicorn
+import httpx # Used for simulating HTTP calls to SDR (external)
+from datetime import datetime
+import os # To read environment variables
+import uuid # To generate unique IDs
+import io # To work with in-memory bytes streams
+
+# --- SQLAlchemy Imports ---
+from sqlalchemy.orm import Session
+from sqlalchemy import select, desc
+
+# --- AWS S3 Imports ---
+import boto3
+from botocore.exceptions import NoCredentialsError, PartialCredentialsError, ClientError
+
+# --- SFTP Imports (Example - uncomment if using SFTP) ---
+# import paramiko # You would need to install paramiko: pip install paramiko
+
+# src.common에서 로거, DB 설정 및 모델 가져오기
+from common.utils import logger, get_db, SubmissionHistory, GeneratedReport, create_database_tables # Import DB models
+from common.utils import send_alert # Import utility
+
+# --- Ensure database tables are created on startup (for local dev) ---
+# In production, handle migrations separately
+# create_database_tables() # Already called in ingestion/error_monitoring, ensure it's run once
+
+# --- SDR Configuration (using Environment Variables) ---
+# Configure either HTTP API or SFTP details based on the SDR requirements
+
+# HTTP API Configuration
+SDR_SUBMISSION_URL = os.environ.get("SDR_SUBMISSION_URL") # REQUIRED for HTTP submission
+
+# SFTP Configuration (Uncomment and configure if using SFTP)
+# SDR_SFTP_HOST = os.environ.get("SDR_SFTP_HOST") # REQUIRED for SFTP submission
+# SDR_SFTP_PORT = int(os.environ.get("SDR_SFTP_PORT", 22)) # Default SFTP port
+# SDR_SFTP_USER = os.environ.get("SDR_SFTP_USER") # REQUIRED for SFTP submission
+# SDR_SFTP_PASSWORD = os.environ.get("SDR_SFTP_PASSWORD") # Use Secrets Management! REQUIRED for password auth
+# SDR_SFTP_PRIVATE_KEY_PATH = os.environ.get("SDR_SFTP_PRIVATE_KEY_PATH") # Use Secrets Management! REQUIRED for key auth
+# SDR_SFTP_REMOTE_PATH = os.environ.get("SDR_SFTP_REMOTE_PATH", "/upload") # Remote directory on SDR SFTP
+
+# --- Internal Service URLs (using Environment Variables) ---
+ERROR_MONITOR_MODULE_URL = os.environ.get("ERROR_MONITOR_MODULE_URL", "http://localhost:8005/report_error") # Default for local testing
+
+# --- AWS S3 Configuration ---
+# Use environment variables for configuration and credentials
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1") # Default region
+S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME") # REQUIRED: Your S3 bucket name
+S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL", None) # Optional: For local testing like MinIO
+
+# Initialize S3 client
+try:
+    s3_client = boto3.client(
+        "s3",
+        region_name=AWS_REGION,
+        endpoint_url=S3_ENDPOINT_URL # Use None if not using a custom endpoint
+    )
+    logger.info(f"S3 client initialized for region {AWS_REGION}, endpoint {S3_ENDPOINT_URL}")
+except Exception as e:
+    logger.critical(f"Failed to initialize S3 client: {e}", exc_info=True)
+    s3_client = None # Set client to None if initialization failed
+
+
+# --- FastAPI 앱 인스턴스 생성 ---
+app = FastAPI()
+
+@app.post("/submit-report")
+async def submit_report(report_info: Dict[str, Any], db: Session = Depends(get_db)): # Receives report info from Report Generation
+    """
+    API endpoint to submit generated report files to the SDR.
+    Retrieves report info from the database, downloads report content from S3,
+    and submits to the SDR using configured method (HTTP or SFTP).
+    Updates submission history.
+    """
+    report_id = report_info.get("report_id") # Get the DB ID of the generated report record
+
+    if not report_id:
+        logger.error(f"Missing report_id in submission request: {report_info}")
+        send_alert("Error", "Missing report ID for submission", {"module": "report-submission", "report_info": report_info})
+        raise HTTPException(status_code=400, detail="Missing required report ID")
+
+    logger.info(f"Received request to submit report (Report DB ID: {report_id})")
+
+    # Retrieve the generated report record from the database
+    generated_report = db.query(GeneratedReport).filter(GeneratedReport.id == report_id).first()
+    if not generated_report:
+         logger.error(f"Generated report record not found in DB for submission: {report_id}")
+         send_alert("Error", f"Generated report record not found for submission: {report_id}", {"module": "report-submission", "report_id": report_id})
+         raise HTTPException(status_code=404, detail=f"Generated report record not found: {report_id}")
+
+    # Check if the report is already submitted or in progress
+    if generated_report.status in ["Submitted", "SubmissionInProgress", "SDR_Accepted", "SDR_Rejected"]:
+        logger.warning(f"Report {report_id} is already in status {generated_report.status}. Skipping submission.")
+        return {"status": "skipped", "message": f"Report already in status {generated_report.status}", "report_id": report_id}
+
+    if s3_client is None:
+        logger.error("S3 client is not initialized. Cannot download report for submission.")
+        send_alert("Critical", "S3 client not initialized", {"module": "report-submission"})
+        raise HTTPException(status_code=500, detail="Report storage service not available")
+
+    if not S3_BUCKET_NAME:
+        logger.error("S3_BUCKET_NAME environment variable is not set. Cannot download report.")
+        send_alert("Critical", "S3_BUCKET_NAME environment variable not set", {"module": "report-submission"})
+        raise HTTPException(status_code=500, detail="Report storage bucket not configured")
+
+    # Determine submission method based on configuration
+    submission_method = None
+    if SDR_SUBMISSION_URL:
+        submission_method = "HTTP_API"
+        logger.info(f"SDR submission method configured: HTTP API to {SDR_SUBMISSION_URL}")
+    # elif SDR_SFTP_HOST and SDR_SFTP_USER and (SDR_SFTP_PASSWORD or SDR_SFTP_PRIVATE_KEY_PATH):
+    #     submission_method = "SFTP"
+    #     logger.info(f"SDR submission method configured: SFTP to {SDR_SFTP_HOST}")
+    else:
+        logger.critical("No SDR submission method configured. Set SDR_SUBMISSION_URL or SFTP environment variables.")
+        send_alert("Critical", "No SDR submission method configured", {"module": "report-submission"})
+        raise HTTPException(status_code=500, detail="SDR submission method not configured")
+
+
+    # Create a submission history record in the database
+    db_submission_record = SubmissionHistory(
+        submission_id = str(uuid.uuid4()), # Unique ID for this submission attempt
+        report_id = generated_report.id, # Link to GeneratedReport
+        submission_timestamp = datetime.utcnow(),
+        status = "Pending", # Initial status
+        report_filename = generated_report.report_filename, # Store filename (S3 object key) in history too
+        entry_count = generated_report.entry_count # Store entry count in history too
+    )
+
+    try:
+        db.add(db_submission_record)
+        # Update the status of the generated report record to indicate submission started
+        generated_report.status = "SubmissionInProgress"
+        generated_report.submission_id = db_submission_record.submission_id # Link submission to report
+        db.add(generated_report) # Stage the update
+        db.commit()
+        db.refresh(db_submission_record) # Get the generated ID
+        db.refresh(generated_report)
+        logger.info(f"Stored submission record {db_submission_record.submission_id} and updated report {generated_report.id} status to SubmissionInProgress.")
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to store submission record or update report status in database: {e}", exc_info=True)
+        send_alert("Critical", f"Database error storing submission record: {e}", {"module": "report-submission", "report_id": report_id, "error": str(e)})
+        raise HTTPException(status_code=500, detail="Failed to record submission attempt")
+
+
+    # --- Download Report File from S3 ---
+    report_content_bytes = None # Use BytesIO for download
+    report_object_key = generated_report.report_filename
+
+    try:
+        if not report_object_key:
+             raise ValueError(f"Report object key is missing for report ID {report_id}")
+
+        # Use BytesIO to download the file content into memory
+        report_content_bytes_io = io.BytesIO()
+        s3_client.download_fileobj(
+            S3_BUCKET_NAME,     # S3 Bucket name
+            report_object_key,  # S3 Object Key
+            report_content_bytes_io # File-like object to download into
+        )
+        report_content_bytes_io.seek(0) # Seek to the beginning of the BytesIO stream
+        report_content_bytes = report_content_bytes_io.read() # Read content as bytes
+
+        logger.info(f"Successfully downloaded report file content from S3 object: s3://{S3_BUCKET_NAME}/{report_object_key}. Size: {len(report_content_bytes)} bytes.")
+
+    except (NoCredentialsError, PartialCredentialsError):
+        submission_error = "AWS credentials not found for S3 download."
+        logger.critical(submission_error, exc_info=True)
+        send_alert("Critical", submission_error, {"module": "report-submission"})
+        # Update DB status to indicate download failure
+        db.rollback() # Rollback current session changes if any
+        db_submission_record = db.query(SubmissionHistory).filter(SubmissionHistory.id == db_submission_record.id).first()
+        generated_report = db.query(GeneratedReport).filter(GeneratedReport.id == generated_report.id).first()
+        if db_submission_record and generated_report:
+             db_submission_record.status = "Failed"
+             db_submission_record.error_details = submission_error
+             generated_report.status = "SubmissionFailed"
+             db.add(db_submission_record)
+             db.add(generated_report)
+             db.commit()
+        raise HTTPException(status_code=500, detail=f"Failed to download report from S3: {submission_error}")
+
+    except ClientError as e:
+        submission_error = f"AWS S3 ClientError during download of {report_object_key}: {e}"
+        logger.critical(submission_error, exc_info=True)
+        send_alert("Critical", submission_error, {"module": "report-submission", "object_key": report_object_key, "error": str(e)})
+        # Update DB status to indicate download failure
+        db.rollback() # Rollback current session changes if any
+        db_submission_record = db.query(SubmissionHistory).filter(SubmissionHistory.id == db_submission_record.id).first()
+        generated_report = db.query(GeneratedReport).filter(GeneratedReport.id == generated_report.id).first()
+        if db_submission_record and generated_report:
+             db_submission_record.status = "Failed"
+             db_submission_record.error_details = submission_error
+             generated_report.status = "SubmissionFailed"
+             db.add(db_submission_record)
+             db.add(generated_report)
+             db.commit()
+        raise HTTPException(status_code=500, detail=f"Failed to download report from S3: {submission_error}")
+
+    except Exception as e:
+        submission_error = f"Unexpected error during S3 download: {e}"
+        logger.critical(submission_error, exc_info=True)
+        send_alert("Critical", submission_error, {"module": "report-submission", "object_key": report_object_key, "error": str(e)})
+        # Update DB status to indicate download failure
+        db.rollback() # Rollback current session changes if any
+        db_submission_record = db.query(SubmissionHistory).filter(SubmissionHistory.id == db_submission_record.id).first()
+        generated_report = db.query(GeneratedReport).filter(GeneratedReport.id == generated_report.id).first()
+        if db_submission_record and generated_report:
+             db_submission_record.status = "Failed"
+             db_submission_record.error_details = submission_error
+             generated_report.status = "SubmissionFailed"
+             db.add(db_submission_record)
+             db.add(generated_report)
+             db.commit()
+        raise HTTPException(status_code=500, detail=f"Failed to download report from S3: {submission_error}")
+
+
+    # --- Implement Actual SDR Submission Logic ---
+    # Use the downloaded report_content_bytes
+
+    submission_successful = False
+    sdr_response_data = None
+    submission_error = None # Reset submission error for the SDR interaction step
+
+    if submission_method == "HTTP_API":
+        logger.info(f"Submitting report {generated_report.report_filename} via HTTP API to {SDR_SUBMISSION_URL}")
+        try:
+            async with httpx.AsyncClient() as client:
+                # Send the report content (bytes) as the request body
+                response = await client.post(SDR_SUBMISSION_URL, content=report_content_bytes, timeout=300.0) # Allow long timeout
+                response.raise_for_status() # Raise for bad status codes
+
+                # TODO: Parse the actual SDR response format
+                sdr_response_data = response.json() # Assuming SDR returns JSON response
+                submission_successful = True # Assume success if no exception and status is good
+
+                logger.info(f"HTTP API submission successful for {generated_report.report_filename}. SDR Response: {sdr_response_data}")
+
+        except httpx.RequestError as exc:
+            submission_error = f"SDR HTTP Submission Failed: {exc}"
+            logger.error(submission_error, exc_info=True)
+            send_alert("Error", submission_error, {"module": "report-submission", "report_id": report_id, "filename": generated_report.report_filename, "target_url": SDR_SUBMISSION_URL})
+        except Exception as e:
+            submission_error = f"Unexpected error during SDR HTTP submission: {e}"
+            logger.error(submission_error, exc_info=True)
+            send_alert("Critical", submission_error, {"module": "report-submission", "report_id": report_id, "filename": generated_report.report_filename, "target_url": SDR_SUBMISSION_URL})
+
+    # elif submission_method == "SFTP":
+    #     logger.info(f"Submitting report {generated_report.report_filename} via SFTP to {SDR_SFTP_HOST}")
+    #     try:
+    #         transport = paramiko.Transport((SDR_SFTP_HOST, SDR_SFTP_PORT))
+    #         # Authenticate
+    #         if SDR_SFTP_PASSWORD:
+    #             transport.connect(username=SDR_SFTP_USER, password=SDR_SFTP_PASSWORD)
+    #         elif SDR_SFTP_PRIVATE_KEY_PATH:
+    #             k = paramiko.RSAKey.from_private_key_file(SDR_SFTP_PRIVATE_KEY_PATH)
+    #             transport.connect(username=SDR_SFTP_USER, pkey=k)
+    #         else:
+    #              raise ValueError("SFTP credentials not configured")
+
+    #         sftp = transport.open_sftp_client()
+
+    #         remote_filepath = os.path.join(SDR_SFTP_REMOTE_PATH, generated_report.report_filename)
+    #         logger.info(f"Uploading {generated_report.report_filename} to {remote_filepath} via SFTP.")
+
+    #         # Use BytesIO stream for upload
+    #         report_content_bytes_io = io.BytesIO(report_content_bytes)
+    #         sftp.putfo(report_content_bytes_io, remote_filepath)
+
+    #         sftp.close()
+    #         transport.close()
+
+    #         submission_successful = True
+    #         sdr_response_data = {"status": "SFTP Uploaded", "remote_path": remote_filepath} # Example response structure
+
+    #         logger.info(f"SFTP submission successful for {generated_report.report_filename}.")
+
+    #     except FileNotFoundError:
+    #          submission_error = f"SFTP private key not found at {SDR_SFTP_PRIVATE_KEY_PATH}"
+    #          logger.critical(submission_error, exc_info=True)
+    #          send_alert("Critical", submission_error, {"module": "report-submission", "key_path": SDR_SFTP_PRIVATE_KEY_PATH})
+    #     except paramiko.AuthenticationException:
+    #         submission_error = "SFTP authentication failed."
+    #         logger.error(submission_error, exc_info=True)
+    #         send_alert("Error", submission_error, {"module": "report-submission", "sftp_host": SDR_SFTP_HOST, "sftp_user": SDR_SFTP_USER})
+    #     except paramiko.SSHException as exc:
+    #         submission_error = f"SFTP SSH error: {exc}"
+    #         logger.error(submission_error, exc_info=True)
+    #         send_alert("Error", submission_error, {"module": "report-submission", "sftp_host": SDR_SFTP_HOST, "error": str(exc)})
+    #     except Exception as e:
+    #         submission_error = f"Unexpected error during SFTP submission: {e}"
+    #         logger.error(submission_error, exc_info=True)
+    #         send_alert("Critical", submission_error, {"module": "report-submission", "report_id": report_id, "filename": generated_report.report_filename})
+
+
+    # --- Update Submission Record and Generated Report Status ---
+    try:
+        # Retrieve the records again in case the session was closed or state is stale
+        db_submission_record = db.query(SubmissionHistory).filter(SubmissionHistory.id == db_submission_record.id).first()
+        generated_report = db.query(GeneratedReport).filter(GeneratedReport.id == generated_report.id).first() # Re-fetch report record
+
+        if db_submission_record and generated_report:
+            if submission_successful:
+                db_submission_record.status = "Submitted"
+                db_submission_record.sdr_response_payload = sdr_response_data
+                generated_report.status = "Submitted" # Update report status
+                logger.info(f"Submission {db_submission_record.submission_id} for report {generated_report.id} marked as Submitted.")
+                # TODO: Trigger next step: SDR acknowledgement processing (P3/later)
+                # SDR might send an acknowledgement file/message later. A separate process would handle this.
+            else:
+                db_submission_record.status = "Failed"
+                db_submission_record.error_details = submission_error
+                generated_report.status = "SubmissionFailed" # Update report status
+                logger.error(f"Submission {db_submission_record.submission_id} for report {generated_report.id} marked as Failed.")
+                # TODO: Trigger error reporting to Error Monitoring module (already done via send_alert, but maybe a dedicated error record is needed)
+                # TODO: Implement retry logic for failed submissions (e.g., queue for retry worker)
+
+            db.add(db_submission_record)
+            db.add(generated_report)
+            db.commit()
+            logger.info("Updated submission and report statuses in DB.")
+        else:
+             logger.error(f"Could not find submission or report record in DB to update status after submission attempt for report {report_id}.")
+             send_alert("Critical", f"Failed to update DB status after submission attempt: {report_id}", {"module": "report-submission", "report_id": report_id})
+
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Critical database error updating status after submission: {e}", exc_info=True)
+        send_alert("Critical", f"Database error updating status after submission: {e}", {"module": "report-submission", "report_id": report_id, "error": str(e)})
+        # This is a critical failure in the submission module itself
+
+    if submission_successful:
+        return {"status": "success", "submission_id": db_submission_record.submission_id, "sdr_response": sdr_response_data}
+    else:
+        # If submission failed, raise an HTTPException
+        raise HTTPException(status_code=500, detail=f"Report submission failed: {submission_error}")
+
+# --- P3: Admin UI를 위한 API 엔드포인트 추가 ---
+@app.get("/submissions")
+async def get_submissions_for_ui(
+    db: Session = Depends(get_db), # Use DB session
+    limit: int = Query(100, description="Maximum number of records to return"),
+    offset: int = Query(0, description="Offset for pagination"),
+    submission_id: Optional[str] = Query(None, description="Filter by submission ID (partial match)"),
+    report_id: Optional[str] = Query(None, description="Filter by report ID"),
+    status: Optional[str] = Query(None, description="Filter by submission status (e.g., Pending, Submitted, Failed)"),
+    # TODO: Add filters for date range, entry count range
+):
+    """
+    API endpoint for the Admin UI frontend to fetch submission history.
+    Fetches from the database.
+    """
+    logger.info(f"Received request to list submissions with filters: submission_id={submission_id}, report_id={report_id}, status={status}, limit={limit}, offset={offset}")
+
+    # Build SQLAlchemy query
+    query = db.query(SubmissionHistory)
+
+    if submission_id:
+        query = query.filter(SubmissionHistory.submission_id.ilike(f"%{submission_id}%"))
+    if report_id:
+        query = query.filter(SubmissionHistory.report_id == report_id)
+    if status:
+        query = query.filter(SubmissionHistory.status == status)
+
+    # Get total count before applying limit/offset
+    total_count = query.count()
+
+    # Apply ordering (e.g., by submission timestamp descending), limit, and offset
+    submission_records = query.order_by(desc(SubmissionHistory.submission_timestamp)).offset(offset).limit(limit).all()
+
+    # Convert SQLAlchemy objects to dictionaries for response
+    submission_list = []
+    for record in submission_records:
+        record_dict = record.__dict__
+        record_dict.pop('_sa_instance_state', None) # Remove SQLAlchemy internal state
+        submission_list.append(record_dict)
+
+    logger.info(f"Found {total_count} matching submission records. Returning {len(submission_list)} after pagination.")
+
+    return {
+        "status": "success",
+        "total_count": total_count,
+        "returned_count": len(submission_list),
+        "offset": offset,
+        "limit": limit,
+        "submissions": submission_list
+    }
+
+@app.get("/health")
+async def health_check(db: Session = Depends(get_db)):
+    """
+    Health check endpoint for the Report Submission module.
+    Checks database connectivity, S3 storage access, and SDR connectivity (placeholder).
+    """
+    db_status = "ok"
+    try:
+        # Attempt to query the database to check connectivity
+        db.query(SubmissionHistory).limit(1).all()
+        db.query(GeneratedReport).limit(1).all() # Also check generated reports table
+    except Exception as e:
+        db_status = f"error: {e}"
+        logger.error(f"Database health check failed: {e}", exc_info=True)
+        send_alert("Critical", f"Database connectivity issue in Report Submission: {e}", {"module": "report-submission", "check": "db_connectivity"})
+
+    # --- S3 Storage Access Check ---
+    storage_status = "ok"
+    if s3_client is None:
+        storage_status = "error: S3 client not initialized"
+    elif not S3_BUCKET_NAME:
+         storage_status = "error: S3_BUCKET_NAME not configured"
+    else:
+        try:
+            # Attempt a simple S3 operation, like listing objects with a prefix that doesn't exist
+            s3_client.list_objects_v2(Bucket=S3_BUCKET_NAME, MaxKeys=1, Prefix="health-check-test-prefix")
+            logger.debug(f"S3 storage health check successful for bucket {S3_BUCKET_NAME}.")
+
+        except (NoCredentialsError, PartialCredentialsError):
+            storage_status = "error: AWS credentials not found"
+            logger.critical("AWS credentials not found during S3 health check.", exc_info=True)
+            send_alert("Critical", "AWS credentials not found for S3 health check", {"module": "report-submission", "check": "storage_access"})
+        except ClientError as e:
+            # Handle specific AWS errors, e.g., bucket not found, access denied
+            if e.response['Error']['Code'] == 'NoSuchBucket':
+                 storage_status = f"error: S3 bucket '{S3_BUCKET_NAME}' not found"
+                 logger.critical(storage_status, exc_info=True)
+                 send_alert("Critical", storage_status, {"module": "report-submission", "check": "storage_access", "bucket": S3_BUCKET_NAME})
+            elif e.response['Error']['Code'] == 'AccessDenied':
+                 storage_status = f"error: S3 access denied for bucket '{S3_BUCKET_NAME}'"
+                 logger.critical(storage_status, exc_info=True)
+                 send_alert("Critical", storage_status, {"module": "report-submission", "check": "storage_access", "bucket": S3_BUCKET_NAME})
+            else:
+                 storage_status = f"error: S3 client error - {e}"
+                 logger.critical(f"S3 ClientError during health check: {e}", exc_info=True)
+                 send_alert("Critical", f"S3 ClientError during health check: {e}", {"module": "report-submission", "check": "storage_access", "error": str(e)})
+        except Exception as e:
+            storage_status = f"error: {e}"
+            logger.critical(f"Unexpected error during S3 health check: {e}", exc_info=True)
+            send_alert("Critical", f"Unexpected error during S3 health check: {e}", {"module": "report-submission", "check": "storage_access", "error": str(e)})
+
+
+    # --- SDR Connectivity Check (Placeholder) ---
+    sdr_connectivity_status = "unchecked"
+    # Determine submission method based on configuration
+    submission_method = None
+    if os.environ.get("SDR_SUBMISSION_URL"):
+        submission_method = "HTTP_API"
+    # elif os.environ.get("SDR_SFTP_HOST") and os.environ.get("SDR_SFTP_USER") and (os.environ.get("SDR_SFTP_PASSWORD") or os.environ.get("SDR_SFTP_PRIVATE_KEY_PATH")):
+    #     submission_method = "SFTP"
+
+    if submission_method == "HTTP_API":
+        sdr_connectivity_status = "checking (HTTP)"
+        try:
+            # Attempt a small, non-submitting call to SDR API if a status endpoint exists
+            # Replace with the actual SDR health check endpoint if available
+            async with httpx.AsyncClient() as client:
+                # This might need to be a specific endpoint provided by the SDR for health checks
+                # Or a simple GET request to the base URL if it's safe and provides a meaningful response
+                # Example: response = await client.get(f"{SDR_SUBMISSION_URL}/status", timeout=10.0)
+                # For now, just try a HEAD request to the submission URL if GET/status is not available/safe
+                response = await client.head(SDR_SUBMISSION_URL, timeout=10.0)
+                response.raise_for_status() # Raise for 4xx/5xx status codes
+                sdr_connectivity_status = "ok (HTTP)"
+                logger.debug(f"SDR HTTP connectivity check successful for {SDR_SUBMISSION_URL}")
+        except Exception as e:
+             sdr_connectivity_status = f"error (HTTP): {e}"
+             logger.error(f"SDR HTTP connectivity check failed for {SDR_SUBMISSION_URL}: {e}", exc_info=True)
+             send_alert("Critical", f"SDR HTTP connectivity issue: {e}", {"module": "report-submission", "check": "sdr_connectivity", "url": SDR_SUBMISSION_URL})
+
+    # elif submission_method == "SFTP":
+    #      sdr_connectivity_status = "checking (SFTP)"
+    #      try:
+    #          # Attempt to connect and authenticate to the SFTP server
+    #          transport = paramiko.Transport((SDR_SFTP_HOST, SDR_SFTP_PORT))
+    #          # Authentication attempt
+    #          if os.environ.get("SDR_SFTP_PASSWORD"):
+    #              transport.connect(username=os.environ.get("SDR_SFTP_USER"), password=os.environ.get("SDR_SFTP_PASSWORD"))
+    #          elif os.environ.get("SDR_SFTP_PRIVATE_KEY_PATH"):
+    #              k = paramiko.RSAKey.from_private_key_file(os.environ.get("SDR_SFTP_PRIVATE_KEY_PATH"))
+    #              transport.connect(username=os.environ.get("SDR_SFTP_USER"), pkey=k)
+
+    #          # If connected, connection is successful
+    #          sdr_connectivity_status = "ok (SFTP)"
+    #          logger.debug(f"SDR SFTP connectivity check successful for {SDR_SFTP_HOST}")
+    #          transport.close() # Close the connection immediately
+
+    #      except Exception as e:
+    #           sdr_connectivity_status = f"error (SFTP): {e}"
+    #           logger.error(f"SDR SFTP connectivity check failed for {SDR_SFTP_HOST}: {e}", exc_info=True)
+    #           send_alert("Critical", f"SDR SFTP connectivity issue: {e}", {"module": "report-submission", "check": "sdr_connectivity", "host": SDR_SFTP_HOST})
+
+
+    return {"status": "ok", "database_status": db_status, "s3_storage_status": storage_status, "sdr_connectivity_status": sdr_connectivity_status}
+
+# To run this module locally:
+# 1. Ensure your database is running.
+# 2. Set the DATABASE_URL environment variable if not using SQLite.
+# 3. Set ERROR_MONITOR_MODULE_URL env var if not using default.
+# 4. Set AWS_REGION and S3_BUCKET_NAME env vars.
+# 5. Configure AWS credentials (env vars, ~/.aws/credentials, etc.).
+# 6. If using a local S3 compatible storage (like MinIO), set S3_ENDPOINT_URL.
+# 7. Set SDR_SUBMISSION_URL env var for real submission (or keep default local dummy). OR Set SFTP env vars.
+# 8. Run uvicorn: uvicorn main:app --reload --port 8004
