@@ -377,3 +377,288 @@ async def health_check(db: Session = Depends(get_db)):
 # 3. Set REPORT_SUBMISSION_MODULE_URL and ERROR_MONITOR_MODULE_URL env vars if not using defaults.
 # 4. Set REPORT_OUTPUT_DIR env var if not using default local path.
 # 5. Run uvicorn: uvicorn main:app --reload --port 8003
+
+
+#===================the incremental transition by integrating the database into the remaining modules and ensuring they use environment variables for inter-module communication
+
+# src/report-generation/main.py
+
+from fastapi import FastAPI, HTTPException, Depends, Query # Import Query for the new endpoint
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Optional
+import uvicorn
+import httpx
+import os # To read environment variables, simulate file creation
+from datetime import datetime
+import uuid # To generate unique IDs
+
+# --- SQLAlchemy Imports ---
+from sqlalchemy.orm import Session
+from sqlalchemy import select, desc # For selecting data and ordering
+
+# src.common에서 로거, DB 설정 및 모델 가져오기
+from common.utils import logger, get_db, GeneratedReport, ProcessedSwapDataDB, create_database_tables # Import DB models
+from common.utils import send_alert # Import utility
+
+# --- Ensure database tables are created on startup (for local dev) ---
+# In production, handle migrations separately
+# create_database_tables() # Already called in ingestion/error_monitoring, ensure it's run once
+
+# TODO: Replace hardcoded URLs with Environment Variables injected by Kubernetes
+# REPORT_SUBMISSION_MODULE_URL = os.environ.get("REPORT_SUBMISSION_MODULE_URL", "http://report-submission-service:80/submit-report") # Example in K8s
+# ERROR_MONITOR_MODULE_URL = os.environ.get("ERROR_MONITOR_MODULE_URL", "http://error-monitoring-service:80/report_error") # Example in K8s
+REPORT_SUBMISSION_MODULE_URL = os.environ.get("REPORT_SUBMISSION_MODULE_URL", "http://localhost:8004/submit-report") # Default to Local testing URL (P2 module)
+ERROR_MONITOR_MODULE_URL = os.environ.get("ERROR_MONITOR_MODULE_URL", "http://localhost:8005/report_error") # Default to Local testing URL
+
+
+# --- FastAPI 앱 인스턴스 생성 ---
+app = FastAPI()
+
+# Simulate a directory for generated report files (Local Placeholder)
+# In a real system, this would be interaction with S3/Blob Storage SDK
+REPORT_OUTPUT_DIR = os.environ.get("REPORT_OUTPUT_DIR", "./generated_reports_local")
+os.makedirs(REPORT_OUTPUT_DIR, exist_ok=True) # Create directory if it doesn't exist
+logger.info(f"Using local directory for report generation simulation: {REPORT_OUTPUT_DIR}")
+
+@app.post("/generate-report")
+async def generate_report(data: List[Dict[str, Any]], db: Session = Depends(get_db)): # Receives Valid ProcessedSwapData as Dict from Validation
+    """
+    API endpoint to generate regulatory report files from valid swap data.
+    Stores report info in the database and forwards to submission.
+    """
+    logger.info(f"Received {len(data)} valid data entries for report generation.")
+
+    if not data:
+        logger.info("No valid data received for report generation.")
+        return {"status": "success", "generated_count": 0, "submission_forward_status": "skipped (no data)"}
+
+    # --- Simulate Report File Generation (Local Placeholder) ---
+    # In a real system, this would use a file storage SDK (S3, Blob)
+    report_timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    batch_report_filename = f"swap_report_batch_{report_timestamp}_{uuid.uuid4().hex[:6]}.txt" # Example filename
+    batch_report_local_path = os.path.join(REPORT_OUTPUT_DIR, batch_report_filename)
+
+    generated_report_info_list: List[GeneratedReport] = []
+    report_generation_errors: List[Dict[str, Any]] = []
+    successfully_formatted_utis: List[str] = [] # Track UTIs that were successfully formatted
+
+    try:
+        # Simulate writing report content to a local file
+        with open(batch_report_local_path, "w") as f:
+            f.write(f"## Swap Report Batch - Generated at {datetime.now().isoformat()}\n")
+            f.write(f"## Number of Entries: {len(data)}\n")
+            f.write("----------------------------------------------------\n")
+
+            for entry_dict in data: # Data is received as list of dicts
+                uti = entry_dict.get("unique_transaction_identifier", "N/A")
+                try:
+                    # Simulate formatting a single entry based on the dict data
+                    # This is where you'd map dict fields to the specific report format (XML, CSV)
+                    report_line = f"UTI: {uti}, Action: {entry_dict.get('action_type')}, Asset Class: {entry_dict.get('asset_class')}, Notional: {entry_dict.get('notional_amount')} {entry_dict.get('notional_currency')}, Effective Date: {entry_dict.get('effective_date')}, Reporting LEI: {entry_dict.get('reporting_counterparty_lei')}\n"
+                    f.write(report_line)
+                    logger.debug(f"Formatted entry for report: {uti}")
+                    successfully_formatted_utis.append(uti)
+
+                except Exception as e:
+                    logger.error(f"Error formatting report entry for UTI {uti}: {e}", exc_info=True)
+                    # Find the original processed data record in DB to link the error? Or just use the dict?
+                    # Using the dict payload for error reporting for simplicity.
+                    report_generation_errors.append({
+                        "source_module": "report-generation",
+                        "data": entry_dict, # Include the data that failed formatting
+                        "errors": [f"Error formatting report entry: {e}"]
+                    })
+                    send_alert("Error", f"Error formatting report entry for UTI {uti}: {e}", {"module": "report-generation", "uti": uti, "error": str(e)})
+                    # Continue processing other entries
+
+            f.write("----------------------------------------------------\n")
+            logger.info(f"Successfully simulated writing batch report file: {batch_report_local_path}")
+
+        # Create the main GeneratedReport DB record for the batch file
+        db_generated_report = GeneratedReport(
+            report_filename=batch_report_filename,
+            report_storage_path=batch_report_local_path, # Store local path for simulation
+            entry_count=len(successfully_formatted_utis), # Count entries successfully formatted
+            generation_timestamp=datetime.utcnow(),
+            status="Generated"
+        )
+        generated_report_info_list.append(db_generated_report)
+
+
+    except Exception as e:
+        logger.error(f"Critical error creating/writing batch report file {batch_report_local_path}: {e}", exc_info=True)
+        send_alert("Critical", f"Critical error writing batch report file: {e}", {"module": "report-generation", "filename": batch_report_filename, "error": str(e)})
+        # If file writing fails critically, none of the entries in this batch can be reported
+        # TODO: Handle this critical failure - perhaps mark all entries in this batch as failed in DB
+        raise HTTPException(status_code=500, detail=f"Failed to generate report file: {e}")
+
+
+    # Simulate storing info about generated reports persistently in the database
+    # And update the status of processed data records that were included in this report
+    try:
+        db.add_all(generated_report_info_list) # Add the new report record
+
+        # Update the status of ProcessedSwapDataDB records that were successfully formatted
+        if successfully_formatted_utis:
+            processed_records_to_update = db.query(ProcessedSwapDataDB).filter(
+                ProcessedSwapDataDB.unique_transaction_identifier.in_(successfully_formatted_utis)
+            ).all()
+            for record in processed_records_to_update:
+                record.report_status = "IncludedInReport" # Add a 'report_status' column to ProcessedSwapDataDB model in common/utils.py
+                record.generated_report_id = db_generated_report.id # Link to the generated report record
+                db.add(record) # Stage the update
+
+        db.commit() # Commit the new report record AND the processed data updates
+        logger.info(f"Successfully simulated storing {len(generated_report_info_list)} generated report records and updating {len(successfully_formatted_utis)} processed data statuses in DB.")
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to store generated report info or update processed data status in database: {e}", exc_info=True)
+        send_alert("Critical", f"Database error storing generated report info: {e}", {"module": "report-generation", "error": str(e)})
+        # If DB storage fails, we cannot reliably track this report.
+        # TODO: Decide how to handle this - maybe delete the generated file?
+
+        # If DB storage fails, we cannot proceed to submission reliably.
+        raise HTTPException(status_code=500, detail="Failed to store generated report info")
+
+
+    # Report any formatting errors to the error monitor
+    if report_generation_errors:
+         logger.error(f"Reporting {len(report_generation_errors)} report generation errors to error monitor.")
+         try:
+             async with httpx.AsyncClient() as client:
+                 # Use the URL from environment variables
+                 response = await client.post(ERROR_MONITOR_MODULE_URL, json=report_generation_errors, timeout=30.0)
+                 response.raise_for_status()
+                 logger.info(f"Successfully reported report generation errors. Response: {response.json()}")
+         except httpx.RequestError as exc:
+             logger.error(f"Failed to report report generation errors to error monitor: {exc}", exc_info=True)
+             send_alert("Error", f"Failed to report report generation errors: {exc}", {"module": "report-generation", "error": str(exc), "target_url": ERROR_MONITOR_MODULE_URL})
+             # TODO: Implement robust error handling for error reporting itself
+         except Exception as e:
+              logger.error(f"An unexpected error occurred during error monitor reporting: {e}", exc_info=True)
+              send_alert("Critical", f"Unexpected error reporting report generation errors: {e}", {"module": "report-generation", "error": str(e), "target_url": ERROR_MONITOR_MODULE_URL})
+
+
+    # Forward the generated report file info (including DB ID) to the Report Submission module
+    if db_generated_report: # Only attempt submission if a report record was created
+        logger.info(f"Forwarding generated report info (DB ID: {db_generated_report.id}, Filename: {db_generated_report.report_filename}) to Report Submission.")
+        try:
+            async with httpx.AsyncClient() as client:
+                # Use the URL from environment variables
+                # Send the DB record ID and relevant info to the submission module
+                submission_payload = {
+                    "report_id": db_generated_report.id, # Pass the DB ID
+                    # The submission module should ideally fetch path/details from DB using this ID
+                    # But for now, pass relevant info directly as in previous version
+                    "report_filename": db_generated_report.report_filename,
+                    "report_storage_path": db_generated_report.report_storage_path, # Pass the storage path/identifier
+                    "entry_count": db_generated_report.entry_count
+                }
+                response = await client.post(REPORT_SUBMISSION_MODULE_URL, json=submission_payload, timeout=120.0) # Allow longer timeout for submission
+                response.raise_for_status()
+                logger.info(f"Successfully sent report info to report submission module. Response: {response.json()}")
+                # TODO: Handle submission module response (e.g., update report status in DB to 'Submitted' or 'SubmissionFailed')
+                # A better approach is for the submission module to update the status directly or via a callback.
+
+        except httpx.RequestError as exc:
+            logger.error(f"Failed to send report info to report submission module: {exc}", exc_info=True)
+            send_alert("Error", f"Failed to forward report to submission: {exc}", {"module": "report-generation", "report_id": db_generated_report.id, "error": str(exc), "target_url": REPORT_SUBMISSION_MODULE_URL})
+            # TODO: Implement robust error handling: retry, DLQ, or mark report for manual submission/re-generation
+            # TODO: Update report status in DB to 'SubmissionFailed'
+
+        except Exception as e:
+             logger.error(f"An unexpected error occurred during report submission module call: {e}", exc_info=True)
+             send_alert("Critical", f"Unexpected error calling report submission module: {e}", {"module": "report-generation", "report_id": db_generated_report.id, "error": str(e), "target_url": REPORT_SUBMISSION_MODULE_URL})
+             # TODO: Implement robust error handling
+             # TODO: Update report status in DB to 'SubmissionFailed'
+
+
+    return {"status": "success", "generated_count": len(generated_report_info_list), "submission_forward_status": "attempted"}
+
+# --- P3: Admin UI를 위한 API 엔드포인트 추가 ---
+@app.get("/reports")
+async def get_reports_for_ui(
+    db: Session = Depends(get_db), # Use DB session
+    limit: int = Query(100, description="Maximum number of records to return"),
+    offset: int = Query(0, description="Offset for pagination"),
+    filename: Optional[str] = Query(None, description="Filter by report filename (partial match)"),
+    status: Optional[str] = Query(None, description="Filter by report status (e.g., Generated, Submitted, SubmissionFailed)"),
+    # TODO: Add filters for date range, entry count range, linked submission ID
+):
+    """
+    API endpoint for the Admin UI frontend to fetch generated report info.
+    Fetches from the database.
+    """
+    logger.info(f"Received request to list reports with filters: filename={filename}, status={status}, limit={limit}, offset={offset}")
+
+    # Build SQLAlchemy query
+    query = db.query(GeneratedReport)
+
+    if filename:
+        query = query.filter(GeneratedReport.report_filename.ilike(f"%{filename}%"))
+    if status:
+        query = query.filter(GeneratedReport.status == status)
+
+    # Get total count before applying limit/offset
+    total_count = query.count()
+
+    # Apply ordering (e.g., by generation timestamp descending), limit, and offset
+    report_records = query.order_by(desc(GeneratedReport.generation_timestamp)).offset(offset).limit(limit).all()
+
+    # Convert SQLAlchemy objects to dictionaries for response
+    report_list = []
+    for record in report_records:
+        record_dict = record.__dict__
+        record_dict.pop('_sa_instance_state', None) # Remove SQLAlchemy internal state
+        report_list.append(record_dict)
+
+    logger.info(f"Found {total_count} matching report records. Returning {len(report_list)} after pagination.")
+
+    return {
+        "status": "success",
+        "total_count": total_count,
+        "returned_count": len(report_list),
+        "offset": offset,
+        "limit": limit,
+        "reports": report_list
+    }
+
+
+@app.get("/health")
+async def health_check(db: Session = Depends(get_db)):
+    """
+    Health check endpoint for the Report Generation module.
+    Checks database connectivity and local report directory access.
+    """
+    db_status = "ok"
+    try:
+        # Attempt to query the database to check connectivity
+        db.query(GeneratedReport).limit(1).all()
+        db.query(ProcessedSwapDataDB).limit(1).all() # Also check processed data table
+    except Exception as e:
+        db_status = f"error: {e}"
+        logger.error(f"Database health check failed: {e}", exc_info=True)
+        send_alert("Critical", f"Database connectivity issue in Report Generation: {e}", {"module": "report-generation", "check": "db_connectivity"})
+
+    file_storage_status = "ok"
+    try:
+        # Check if the local report directory is writable (simulating file storage access)
+        test_file = os.path.join(REPORT_OUTPUT_DIR, ".test_write")
+        with open(test_file, "w") as f:
+            f.write("test")
+        os.remove(test_file)
+    except Exception as e:
+        file_storage_status = f"error: {e}"
+        logger.error(f"File storage (local dir) access check failed: {e}", exc_info=True)
+        send_alert("Critical", f"File storage access issue in Report Generation: {e}", {"module": "report-generation", "check": "file_storage_access"})
+
+
+    return {"status": "ok", "database_status": db_status, "file_storage_status": file_storage_status}
+
+# To run this module locally:
+# 1. Ensure your database is running.
+# 2. Set the DATABASE_URL environment variable if not using SQLite.
+# 3. Set REPORT_SUBMISSION_MODULE_URL and ERROR_MONITOR_MODULE_URL env vars if not using defaults.
+# 4. Set REPORT_OUTPUT_DIR env var if not using default local path.
+# 5. Run uvicorn: uvicorn main:app --reload --port 8003
