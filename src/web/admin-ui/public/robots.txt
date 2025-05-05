@@ -1,0 +1,4 @@
+# Learn more about robots.txt at [https://www.robotstxt.org/wc/robots.html](https://www.robotstxt.org/wc/robots.html)
+
+User-agent: *
+Disallow:
