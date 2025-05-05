@@ -1,0 +1,159 @@
+// src/admin-ui/src/App.css
+/* Basic Ghibli-inspired color palette and font */
+:root {
+  --ghibli-bg-light: #f0e4d6; /* Warm, light background */
+  --ghibli-bg-medium: #d3c0a6; /* Slightly darker background */
+  --ghibli-text-dark: #3a3a3a; /* Dark text */
+  --ghibli-accent-green: #8fbc8f; /* Soft green accent */
+  --ghibli-accent-blue: #a0c4ff; /* Sky blue accent */
+  --ghibli-error-red: #e57373; /* Soft red for errors */
+  --ghibli-border-color: #a6a6a6; /* Subtle border */
+}
+
+/* Import a whimsical font */
+@import url('[https://fonts.googleapis.com/css2?family=Gaegu&display=swap](https://fonts.googleapis.com/css2?family=Gaegu&display=swap)');
+
+body {
+  margin: 0;
+  font-family: 'Gaegu', cursive; /* Apply Ghibli-inspired font */
+  background-color: var(--ghibli-bg-light);
+  color: var(--ghibli-text-dark);
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.navbar {
+  background-color: var(--ghibli-bg-medium);
+  padding: 1rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-bottom: 1px solid var(--ghibli-border-color);
+}
+
+.navbar-brand {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: var(--ghibli-text-dark);
+}
+
+.navbar-nav {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+}
+
+.nav-item {
+  margin-left: 1.5rem;
+}
+
+.nav-link {
+  text-decoration: none;
+  color: var(--ghibli-text-dark);
+  font-size: 1.1rem;
+  padding: 0.5rem 0;
+  border-bottom: 2px solid transparent;
+  transition: border-bottom 0.3s ease;
+}
+
+.nav-link:hover {
+  border-bottom-color: var(--ghibli-accent-green);
+}
+
+.main-content {
+  flex-grow: 1;
+  padding: 2rem;
+}
+
+/* General Styles for UI elements */
+.card {
+  background-color: #fff;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--ghibli-border-color);
+}
+
+.card-header {
+  font-size: 1.3rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--ghibli-border-color);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+.table th, .table td {
+  padding: 0.8rem;
+  text-align: left;
+  border-bottom: 1px solid #ddd;
+}
+
+.table th {
+  background-color: var(--ghibli-bg-light);
+  font-weight: bold;
+}
+
+.table tr:hover {
+  background-color: #f9f9f9;
+}
+
+.button {
+  display: inline-block;
+  background-color: var(--ghibli-accent-blue);
+  color: white;
+  padding: 0.7rem 1.2rem;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background-color 0.3s ease;
+  text-decoration: none; /* For button links */
+  text-align: center;
+}
+
+.button:hover {
+  background-color: #8ab4f8;
+}
+
+.button-danger {
+  background-color: var(--ghibli-error-red);
+}
+
+.button-danger:hover {
+  background-color: #d32f2f;
+}
+
+.error-message {
+  color: var(--ghibli-error-red);
+  font-weight: bold;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  font-weight: bold;
+  color: white;
+  text-transform: capitalize;
+}
+
+.status-badge.open { background-color: #ffb300; } /* Amber */
+.status-badge.investigating { background-color: #1e88e5; } /* Blue */
+.status-badge.resolved { background-color: var(--ghibli-accent-green); } /* Green */
+.status-badge.closed { background-color: #757575; } /* Grey */
+.status-badge.failed { background-color: var(--ghibli-error-red); } /* Red */
+.status-badge.retrying { background-color: #673ab7; } /* Deep Purple */
+
