@@ -1,0 +1,363 @@
+# src/report-generation/main.py
+
+from fastapi import FastAPI, HTTPException, Depends, Query
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Optional
+import uvicorn
+import httpx
+import os # To read environment variables
+from datetime import datetime
+import uuid # To generate unique IDs
+import io # To work with in-memory bytes streams
+
+# --- SQLAlchemy Imports ---
+from sqlalchemy.orm import Session
+from sqlalchemy import select, desc
+
+# --- AWS S3 Imports ---
+import boto3
+from botocore.exceptions import NoCredentialsError, PartialCredentialsError, ClientError
+
+# src.common에서 로거, DB 설정 및 모델 가져오기
+from common.utils import logger, get_db, GeneratedReport, ProcessedSwapDataDB, create_database_tables # Import DB models
+from common.utils import send_alert # Import utility
+
+# --- Ensure database tables are created on startup (for local dev) ---
+# In production, handle migrations separately
+# create_database_tables() # Already called in ingestion/error_monitoring, ensure it's run once
+
+# TODO: Replace hardcoded URLs with Environment Variables injected by Kubernetes
+REPORT_SUBMISSION_MODULE_URL = os.environ.get("REPORT_SUBMISSION_MODULE_URL", "http://localhost:8004/submit-report") # Default to Local testing URL (P2 module)
+ERROR_MONITOR_MODULE_URL = os.environ.get("ERROR_MONITOR_MODULE_URL", "http://localhost:8005/report_error") # Default to Local testing URL
+
+# --- AWS S3 Configuration ---
+# Use environment variables for configuration and credentials
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1") # Default region
+S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME") # REQUIRED: Your S3 bucket name
+S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL", None) # Optional: For local testing like MinIO
+
+# Initialize S3 client
+# Boto3 automatically looks for credentials in standard locations (env vars, ~/.aws/credentials, IAM roles)
+try:
+    s3_client = boto3.client(
+        "s3",
+        region_name=AWS_REGION,
+        endpoint_url=S3_ENDPOINT_URL # Use None if not using a custom endpoint
+    )
+    # Perform a quick check to see if client initialization worked (doesn't check connectivity yet)
+    logger.info(f"S3 client initialized for region {AWS_REGION}, endpoint {S3_ENDPOINT_URL}")
+except Exception as e:
+    logger.critical(f"Failed to initialize S3 client: {e}", exc_info=True)
+    # This is a critical startup error, the application might not be able to generate reports.
+    # In a real app, you might raise an exception here to prevent startup.
+    s3_client = None # Set client to None if initialization failed
+
+
+# --- FastAPI 앱 인스ANCE 생성 ---
+app = FastAPI()
+
+
+@app.post("/generate-report")
+async def generate_report(data: List[Dict[str, Any]], db: Session = Depends(get_db)): # Receives Valid ProcessedSwapData as Dict from Validation
+    """
+    API endpoint to generate regulatory report files from valid swap data.
+    Generates report content, uploads to S3,
+    stores report info in the database, and forwards to submission.
+    """
+    logger.info(f"Received {len(data)} valid data entries for report generation.")
+
+    if not data:
+        logger.info("No valid data received for report generation.")
+        return {"status": "success", "generated_count": 0, "submission_forward_status": "skipped (no data)"}
+
+    if s3_client is None:
+        logger.error("S3 client is not initialized. Cannot generate and upload report.")
+        send_alert("Critical", "S3 client not initialized", {"module": "report-generation"})
+        raise HTTPException(status_code=500, detail="Report storage service not available")
+
+    if not S3_BUCKET_NAME:
+        logger.error("S3_BUCKET_NAME environment variable is not set. Cannot upload report.")
+        send_alert("Critical", "S3_BUCKET_NAME environment variable not set", {"module": "report-generation"})
+        raise HTTPException(status_code=500, detail="Report storage bucket not configured")
+
+
+    # --- Generate Report Content in Memory ---
+    report_timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    # Use a unique object name for the S3 file
+    report_object_key = f"reports/swap_report_batch_{report_timestamp}_{uuid.uuid4().hex}.txt" # Example object key/name
+
+    report_content_stream = io.StringIO() # Use StringIO to build text report in memory
+
+    report_generation_errors: List[Dict[str, Any]] = []
+    successfully_formatted_utis: List[str] = [] # Track UTIs that were successfully formatted
+
+    try:
+        report_content_stream.write(f"## Swap Report Batch - Generated at {datetime.now().isoformat()}\n")
+        report_content_stream.write(f"## Number of Entries: {len(data)}\n")
+        report_content_stream.write("----------------------------------------------------\n")
+
+        for entry_dict in data: # Data is received as list of dicts
+            uti = entry_dict.get("unique_transaction_identifier", "N/A")
+            try:
+                # Simulate formatting a single entry based on the dict data
+                # This is where you'd map dict fields to the specific report format (XML, CSV)
+                report_line = f"UTI: {uti}, Action: {entry_dict.get('action_type')}, Asset Class: {entry_dict.get('asset_class')}, Notional: {entry_dict.get('notional_amount')} {entry_dict.get('notional_currency')}, Effective Date: {entry_dict.get('effective_date')}, Reporting LEI: {entry_dict.get('reporting_counterparty_lei')}\n"
+                report_content_stream.write(report_line)
+                logger.debug(f"Formatted entry for report: {uti}")
+                successfully_formatted_utis.append(uti)
+
+            except Exception as e:
+                logger.error(f"Error formatting report entry for UTI {uti}: {e}", exc_info=True)
+                report_generation_errors.append({
+                    "source_module": "report-generation",
+                    "data": entry_dict, # Include the data that failed formatting
+                    "errors": [f"Error formatting report entry: {e}"]
+                })
+                send_alert("Error", f"Error formatting report entry for UTI {uti}: {e}", {"module": "report-generation", "uti": uti, "error": str(e)})
+                # Continue processing other entries
+
+        report_content_stream.write("----------------------------------------------------\n")
+        # Get content as bytes from the StringIO stream
+        report_content_bytes = io.BytesIO(report_content_stream.getvalue().encode('utf-8')) # Use BytesIO for upload
+
+        logger.info(f"Finished generating report content in memory. Size: {report_content_bytes.getbuffer().nbytes} bytes.")
+
+    except Exception as e:
+        logger.error(f"Critical error generating report content in memory: {e}", exc_info=True)
+        send_alert("Critical", f"Critical error generating report content: {e}", {"module": "report-generation", "error": str(e)})
+        raise HTTPException(status_code=500, detail=f"Failed to generate report content: {e}")
+
+
+    # --- Uploading Report File to S3 ---
+    upload_success = False
+    try:
+        # Use boto3 to upload the BytesIO stream
+        s3_client.upload_fileobj(
+            report_content_bytes, # File-like object to upload
+            S3_BUCKET_NAME,       # S3 Bucket name
+            report_object_key     # S3 Object Key (path/filename in S3)
+        )
+        upload_success = True
+        logger.info(f"Successfully uploaded report object to S3: s3://{S3_BUCKET_NAME}/{report_object_key}")
+
+    except (NoCredentialsError, PartialCredentialsError):
+        logger.critical("AWS credentials not found. Cannot upload to S3.", exc_info=True)
+        send_alert("Critical", "AWS credentials not found for S3 upload", {"module": "report-generation"})
+        raise HTTPException(status_code=500, detail="AWS credentials not configured for S3")
+    except ClientError as e:
+        logger.critical(f"AWS S3 ClientError during upload of {report_object_key}: {e}", exc_info=True)
+        send_alert("Critical", f"S3 ClientError during upload: {e}", {"module": "report-generation", "object_key": report_object_key, "error": str(e)})
+        raise HTTPException(status_code=500, detail=f"S3 upload failed: {e}")
+    except Exception as e:
+        logger.critical(f"Unexpected error uploading report file to S3: {e}", exc_info=True)
+        send_alert("Critical", f"Unexpected error uploading report file: {e}", {"module": "report-generation", "object_key": report_object_key, "error": str(e)})
+        raise HTTPException(status_code=500, detail=f"Failed to upload report file: {e}")
+
+
+    # --- Database Operations (Store Report Info and Update Processed Data) ---
+    db_generated_report = None
+    if upload_success:
+        # Create the main GeneratedReport DB record for the batch file
+        db_generated_report = GeneratedReport(
+            report_filename=report_object_key, # Store object key as filename
+            report_storage_path=f"s3://{S3_BUCKET_NAME}/{report_object_key}", # Store a conceptual S3 URI
+            entry_count=len(successfully_formatted_utis), # Count entries successfully formatted
+            generation_timestamp=datetime.utcnow(),
+            status="Generated"
+        )
+        # generated_report_info_list.append(db_generated_report) # Not needed as we add directly
+
+    try:
+        if db_generated_report:
+            db.add(db_generated_report) # Add the new report record
+
+            # Update the status of ProcessedSwapDataDB records that were successfully formatted
+            if successfully_formatted_utis:
+                # Fetch records by UTI
+                processed_records_to_update = db.query(ProcessedSwapDataDB).filter(
+                    ProcessedSwapDataDB.unique_transaction_identifier.in_(successfully_formatted_utis)
+                ).all()
+                for record in processed_records_to_update:
+                    # Ensure 'report_status' and 'generated_report_id' columns exist in ProcessedSwapDataDB model in common/utils.py
+                    record.report_status = "IncludedInReport"
+                    record.generated_report_id = db_generated_report.id
+                    db.add(record) # Stage the update
+
+            db.commit() # Commit the new report record AND the processed data updates
+            logger.info(f"Successfully stored generated report record ({db_generated_report.id}) and updated {len(successfully_formatted_utis)} processed data statuses in DB.")
+
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to store generated report info or update processed data status in database: {e}", exc_info=True)
+        send_alert("Critical", f"Database error storing generated report info: {e}", {"module": "report-generation", "error": str(e)})
+        # If DB storage fails, we cannot reliably track this report.
+        # TODO: Decide how to handle this - maybe delete the uploaded file from S3?
+
+        # If DB storage fails, we cannot proceed to submission reliably.
+        raise HTTPException(status_code=500, detail="Failed to store generated report info")
+
+
+    # Report any formatting errors to the error monitor
+    if report_generation_errors:
+         logger.error(f"Reporting {len(report_generation_errors)} report generation errors to error monitor.")
+         try:
+             async with httpx.AsyncClient() as client:
+                 # Use the URL from environment variables
+                 response = await client.post(ERROR_MONITOR_MODULE_URL, json=report_generation_errors, timeout=30.0)
+                 response.raise_for_status()
+                 logger.info(f"Successfully reported report generation errors. Response: {response.json()}")
+         except httpx.RequestError as exc:
+             logger.error(f"Failed to report report generation errors to error monitor: {exc}", exc_info=True)
+             send_alert("Error", f"Failed to report report generation errors: {exc}", {"module": "report-generation", "error": str(exc), "target_url": ERROR_MONITOR_MODULE_URL})
+             # TODO: Implement robust error handling for error reporting itself
+         except Exception as e:
+              logger.error(f"An unexpected error occurred during error monitor reporting: {e}", exc_info=True)
+              send_alert("Critical", f"Unexpected error reporting report generation errors: {e}", {"module": "report-generation", "error": str(e), "target_url": ERROR_MONITOR_MODULE_URL})
+
+
+    # Forward the generated report file info (including DB ID) to the Report Submission module
+    if db_generated_report: # Only attempt submission if a report record was created
+        logger.info(f"Forwarding generated report info (DB ID: {db_generated_report.id}, Filename: {db_generated_report.report_filename}) to Report Submission.")
+        try:
+            async with httpx.AsyncClient() as client:
+                # Use the URL from environment variables
+                # Send the DB record ID to the submission module
+                submission_payload = {
+                    "report_id": db_generated_report.id, # Pass the DB ID
+                    # The submission module will fetch path/details from DB using this ID
+                }
+                response = await client.post(REPORT_SUBMISSION_MODULE_URL, json=submission_payload, timeout=120.0) # Allow longer timeout for submission
+                response.raise_for_status()
+                logger.info(f"Successfully sent report info to report submission module. Response: {response.json()}")
+                # TODO: Handle submission module response (e.g., update report status in DB to 'Submitted' or 'SubmissionFailed')
+                # A better approach is for the submission module to update the status directly or via a callback.
+
+        except httpx.RequestError as exc:
+            logger.error(f"Failed to send report info to report submission module: {exc}", exc_info=True)
+            send_alert("Error", f"Failed to forward report to submission: {exc}", {"module": "report-generation", "report_id": db_generated_report.id, "error": str(exc), "target_url": REPORT_SUBMISSION_MODULE_URL})
+            # TODO: Implement robust error handling: retry, DLQ, or mark report for manual submission/re-generation
+            # TODO: Update report status in DB to 'SubmissionFailed'
+
+        except Exception as e:
+             logger.error(f"An unexpected error occurred during report submission module call: {e}", exc_info=True)
+             send_alert("Critical", f"Unexpected error calling report submission module: {e}", {"module": "report-generation", "report_id": db_generated_report.id, "error": str(e), "target_url": REPORT_SUBMISSION_MODULE_URL})
+             # TODO: Implement robust error handling
+             # TODO: Update report status in DB to 'SubmissionFailed'
+
+
+    return {"status": "success", "generated_count": len(generated_report_info_list), "submission_forward_status": "attempted"}
+
+# --- P3: Admin UI를 위한 API 엔드포인트 추가 ---
+@app.get("/reports")
+async def get_reports_for_ui(
+    db: Session = Depends(get_db), # Use DB session
+    limit: int = Query(100, description="Maximum number of records to return"),
+    offset: int = Query(0, description="Offset for pagination"),
+    filename: Optional[str] = Query(None, description="Filter by report filename (partial match)"),
+    status: Optional[str] = Query(None, description="Filter by report status (e.g., Generated, Submitted, SubmissionFailed)"),
+    # TODO: Add filters for date range, entry count range, linked submission ID
+):
+    """
+    API endpoint for the Admin UI frontend to fetch generated report info.
+    Fetches from the database.
+    """
+    logger.info(f"Received request to list reports with filters: filename={filename}, status={status}, limit={limit}, offset={offset}")
+
+    # Build SQLAlchemy query
+    query = db.query(GeneratedReport)
+
+    if filename:
+        query = query.filter(GeneratedReport.report_filename.ilike(f"%{filename}%"))
+    if status:
+        query = query.filter(GeneratedReport.status == status)
+
+    # Get total count before applying limit/offset
+    total_count = query.count()
+
+    # Apply ordering (e.g., by generation timestamp descending), limit, and offset
+    report_records = query.order_by(desc(GeneratedReport.generation_timestamp)).offset(offset).limit(limit).all()
+
+    # Convert SQLAlchemy objects to dictionaries for response
+    report_list = []
+    for record in report_records:
+        record_dict = record.__dict__
+        record_dict.pop('_sa_instance_state', None) # Remove SQLAlchemy internal state
+        report_list.append(record_dict)
+
+    logger.info(f"Found {total_count} matching report records. Returning {len(report_list)} after pagination.")
+
+    return {
+        "status": "success",
+        "total_count": total_count,
+        "returned_count": len(report_list),
+        "offset": offset,
+        "limit": limit,
+        "reports": report_list
+    }
+
+
+@app.get("/health")
+async def health_check(db: Session = Depends(get_db)):
+    """
+    Health check endpoint for the Report Generation module.
+    Checks database connectivity and S3 storage access.
+    """
+    db_status = "ok"
+    try:
+        # Attempt to query the database to check connectivity
+        db.query(GeneratedReport).limit(1).all()
+        db.query(ProcessedSwapDataDB).limit(1).all() # Also check processed data table
+    except Exception as e:
+        db_status = f"error: {e}"
+        logger.error(f"Database health check failed: {e}", exc_info=True)
+        send_alert("Critical", f"Database connectivity issue in Report Generation: {e}", {"module": "report-generation", "check": "db_connectivity"})
+
+    # --- S3 Storage Access Check ---
+    storage_status = "ok"
+    if s3_client is None:
+        storage_status = "error: S3 client not initialized"
+    elif not S3_BUCKET_NAME:
+         storage_status = "error: S3_BUCKET_NAME not configured"
+    else:
+        try:
+            # Attempt a simple S3 operation, like listing objects with a prefix that doesn't exist
+            # or checking if the bucket exists and you have permission.
+            # Listing objects is generally safer than trying to upload/download a test file
+            # if you don't want to manage test objects.
+            s3_client.list_objects_v2(Bucket=S3_BUCKET_NAME, MaxKeys=1, Prefix="health-check-test-prefix")
+            logger.debug(f"S3 storage health check successful for bucket {S3_BUCKET_NAME}.")
+
+        except (NoCredentialsError, PartialCredentialsError):
+            storage_status = "error: AWS credentials not found"
+            logger.critical("AWS credentials not found during S3 health check.", exc_info=True)
+            send_alert("Critical", "AWS credentials not found for S3 health check", {"module": "report-generation", "check": "storage_access"})
+        except ClientError as e:
+            # Handle specific AWS errors, e.g., bucket not found, access denied
+            if e.response['Error']['Code'] == 'NoSuchBucket':
+                 storage_status = f"error: S3 bucket '{S3_BUCKET_NAME}' not found"
+                 logger.critical(storage_status, exc_info=True)
+                 send_alert("Critical", storage_status, {"module": "report-generation", "check": "storage_access", "bucket": S3_BUCKET_NAME})
+            elif e.response['Error']['Code'] == 'AccessDenied':
+                 storage_status = f"error: S3 access denied for bucket '{S3_BUCKET_NAME}'"
+                 logger.critical(storage_status, exc_info=True)
+                 send_alert("Critical", storage_status, {"module": "report-generation", "check": "storage_access", "bucket": S3_BUCKET_NAME})
+            else:
+                 storage_status = f"error: S3 client error - {e}"
+                 logger.critical(f"S3 ClientError during health check: {e}", exc_info=True)
+                 send_alert("Critical", f"S3 ClientError during health check: {e}", {"module": "report-generation", "check": "storage_access", "error": str(e)})
+        except Exception as e:
+            storage_status = f"error: {e}"
+            logger.critical(f"Unexpected error during S3 health check: {e}", exc_info=True)
+            send_alert("Critical", f"Unexpected error during S3 health check: {e}", {"module": "report-generation", "check": "storage_access", "error": str(e)})
+
+
+    return {"status": "ok", "database_status": db_status, "s3_storage_status": storage_status}
+
+# To run this module locally:
+# 1. Ensure your database is running.
+# 2. Set the DATABASE_URL environment variable if not using SQLite.
+# 3. Set REPORT_SUBMISSION_MODULE_URL and ERROR_MONITOR_MODULE_URL env vars if not using defaults.
+# 4. Set AWS_REGION and S3_BUCKET_NAME env vars.
+# 5. Configure AWS credentials (env vars, ~/.aws/credentials, etc.).
+# 6. If using a local S3 compatible storage (like MinIO), set S3_ENDPOINT_URL.
+# 7. Run uvicorn: uvicorn main:app --reload --port 8003
