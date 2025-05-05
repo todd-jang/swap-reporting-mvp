@@ -1,0 +1,109 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-ingestion-service # Internal DNS name: data-ingestion-service.swap-reporting.svc.cluster.local
+  namespace: swap-reporting
+spec:
+  selector:
+    app: data-ingestion
+  ports:
+  - protocol: TCP
+    port: 8000 # Service port
+    targetPort: 8000 # Container port
+  type: ClusterIP # Default type, exposes the service internally
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-processing-service # Internal DNS name: data-processing-service.swap-reporting.svc.cluster.local
+  namespace: swap-reporting
+spec:
+  selector:
+    app: data-processing
+  ports:
+  - protocol: TCP
+    port: 8001
+    targetPort: 8001
+  type: ClusterIP
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: validation-service # Internal DNS name: validation-service.swap-reporting.svc.cluster.local
+  namespace: swap-reporting
+spec:
+  selector:
+    app: validation
+  ports:
+  - protocol: TCP
+    port: 8002
+    targetPort: 8002
+  type: ClusterIP
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: report-generation-service # Internal DNS name: report-generation-service.swap-reporting.svc.cluster.local
+  namespace: swap-reporting
+spec:
+  selector:
+    app: report-generation
+  ports:
+  - protocol: TCP
+    port: 8003
+    targetPort: 8003
+  type: ClusterIP
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: report-submission-service # Internal DNS name: report-submission-service.swap-reporting.svc.cluster.local
+  namespace: swap-reporting
+spec:
+  selector:
+    app: report-submission
+  ports:
+  - protocol: TCP
+    port: 8004
+    targetPort: 8004
+  type: ClusterIP
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: error-monitoring-service # Internal DNS name: error-monitoring-service.swap-reporting.svc.cluster.local
+  namespace: swap-reporting
+spec:
+  selector:
+    app: error-monitoring
+  ports:
+  - protocol: TCP
+    port: 8005
+    targetPort: 8005
+  type: ClusterIP
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-service # Internal DNS name: web-service.swap-reporting.svc.cluster.local
+  namespace: swap-reporting
+spec:
+  selector:
+    app: web
+  ports:
+  - protocol: TCP
+    port: 8006
+    targetPort: 8006
+  type: ClusterIP # Expose internally, use Ingress for external access
