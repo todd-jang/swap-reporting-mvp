@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: report-submission-deployment
+  namespace: swap-reporting
+spec:
+  replicas: 2 # Run 2 instances
+  selector:
+    matchLabels:
+      app: report-submission
+  template:
+    metadata:
+      labels:
+        app: report-submission
+    spec:
+      containers:
+      - name: report-submission
+        image: your-docker-registry/report-submission:latest # Replace with your image
+        ports:
+        - containerPort: 8004
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: swap-reporting-config
+              key: DATABASE_URL
+        # S3 Configuration
+        - name: AWS_REGION
+          valueFrom:
+            configMapKeyRef:
+              name: swap-reporting-config
+              key: AWS_REGION
+        - name: S3_BUCKET_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: swap-reporting-config
+              key: S3_BUCKET_NAME
+        # S3 Credentials from Secret
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: swap-reporting-secrets
+              key: AWS_ACCESS_KEY_ID
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: swap-reporting-secrets
+              key: AWS_SECRET_ACCESS_KEY
+        # SDR Configuration (HTTP API)
+        - name: SDR_SUBMISSION_URL
+          valueFrom:
+            configMapKeyRef:
+              name: swap-reporting-config
+              key: SDR_SUBMISSION_URL
+        # SDR Configuration (SFTP) - Uncomment if needed
+        # - name: SDR_SFTP_HOST
+        #   valueFrom:
+        #     configMapKeyRef:
+        #       name: swap-reporting-config
+        #       key: SDR_SFTP_HOST
+        # - name: SDR_SFTP_PORT
+        #   valueFrom:
+        #     configMapKeyRef:
+        #       name: swap-reporting-config
+        #       key: SDR_SFTP_PORT
+        # - name: SDR_SFTP_USER
+        #   valueFrom:
+        #     configMapKeyRef:
+        #       name: swap-reporting-config
+        #       key: SDR_SFTP_USER
+        # - name: SDR_SFTP_PASSWORD # From Secret
+        #   valueFrom:
+        #     secretKeyRef:
+        #       name: swap-reporting-secrets
+        #       key: SDR_SFTP_PASSWORD
+        # - name: SDR_SFTP_PRIVATE_KEY_PATH # If key is mounted as a file
+        #   value: /etc/sftp-key/id_rsa # Example path if key is mounted
+        # Mount SFTP private key if using key auth
+        # volumeMounts:
+        # - name: sftp-private-key
+        #   mountPath: /etc/sftp-key
+        #   readOnly: true
+        # volumes: # Define volume for SFTP private key if mounting from a Secret
+        # - name: sftp-private-key
+        #   secret:
+        #     secretName: swap-reporting-secrets # The secret containing the key
+        #     items:
+        #     - key: SDR_SFTP_PRIVATE_KEY # Key in the secret
+        #       path: id_rsa # Filename in the mount path
+        # Configure downstream service URLs
+        - name: ERROR_MONITOR_MODULE_URL
+          value: http://error-monitoring-service:8005/report_error
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8004
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8004
+          initialDelaySeconds: 15
+          periodSeconds: 10
