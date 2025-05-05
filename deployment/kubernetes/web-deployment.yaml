@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-deployment
+  namespace: swap-reporting
+spec:
+  replicas: 2 # Run 2 instances
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+      - name: web
+        image: your-docker-registry/web:latest # Replace with your image
+        ports:
+        - containerPort: 8006
+        env:
+        # Configure downstream service URLs for the web backend to call
+        - name: ERROR_MONITOR_SERVICE_URL
+          value: http://error-monitoring-service:8005
+        - name: DATA_PROCESSING_SERVICE_URL
+          value: http://data-processing-service:8001
+        - name: REPORT_GENERATION_SERVICE_URL
+          value: http://report-generation-service:8003
+        - name: REPORT_SUBMISSION_SERVICE_URL
+          value: http://report-submission-service:8004
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8006
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8006
+          initialDelaySeconds: 15
+          periodSeconds: 10
