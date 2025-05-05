@@ -1,0 +1,45 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: swap-reporting-ingress
+  namespace: swap-reporting
+  annotations:
+    # Add annotations specific to your Ingress Controller (e.g., nginx, traefik, cloud provider)
+    # Example for nginx-ingress:
+    # nginx.ingress.kubernetes.io/rewrite-target: /$2
+    # kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+  - host: admin.swap-reporting.example.com # Replace with your desired hostname
+    http:
+      paths:
+      - path: / # Route root path to the web service
+        pathType: Prefix
+        backend:
+          service:
+            name: web-service
+            port:
+              number: 8006
+      # - path: /api/(.*) # Example: Route /api paths to web service (if web module acts as API gateway)
+      #   pathType: Prefix
+      #   backend:
+      #     service:
+      #       name: web-service
+      #       port:
+      #         number: 8006
+  # Optional: Expose ingestion endpoint if needed
+  # - host: ingest.swap-reporting.example.com # Replace with your desired hostname
+  #   http:
+  #     paths:
+  #     - path: /ingest # Route /ingest path to data-ingestion service
+  #       pathType: Prefix
+  #       backend:
+  #         service:
+  #           name: data-ingestion-service
+  #           port:
+  #             number: 8000
+  # tls: # Optional: Configure TLS/SSL
+  # - hosts:
+  #   - admin.swap-reporting.example.com
+  #   # - ingest.swap-reporting.example.com
+  #   secretName: swap-reporting-tls-secret # Kubernetes Secret containing TLS certificate 
