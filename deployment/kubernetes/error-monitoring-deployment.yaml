@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: error-monitoring-deployment
+  namespace: swap-reporting
+spec:
+  replicas: 2 # Run 2 instances
+  selector:
+    matchLabels:
+      app: error-monitoring
+  template:
+    metadata:
+      labels:
+        app: error-monitoring
+    spec:
+      containers:
+      - name: error-monitoring
+        image: your-docker-registry/error-monitoring:latest # Replace with your image
+        ports:
+        - containerPort: 8005
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: swap-reporting-config
+              key: DATABASE_URL
+        # Configure downstream service URLs (for retry logic)
+        - name: PROCESSING_MODULE_URL
+          value: http://data-processing-service:8001/process
+        - name: INGESTION_MODULE_URL
+          value: http://data-ingestion-service:8000/ingest
+        # TODO: Add URLs for other modules if retry logic needs to call them directly
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8005
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8005
+          initialDelaySeconds: 15
+          periodSeconds: 10
