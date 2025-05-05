@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-processing-deployment
+  namespace: swap-reporting
+spec:
+  replicas: 2 # Run 2 instances
+  selector:
+    matchLabels:
+      app: data-processing
+  template:
+    metadata:
+      labels:
+        app: data-processing
+    spec:
+      containers:
+      - name: data-processing
+        image: your-docker-registry/data-processing:latest # Replace with your image
+        ports:
+        - containerPort: 8001
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: swap-reporting-config
+              key: DATABASE_URL
+        # Configure downstream service URLs
+        - name: VALIDATION_MODULE_URL
+          value: http://validation-service:8002/validate
+        - name: ERROR_MONITOR_MODULE_URL
+          value: http://error-monitoring-service:8005/report_error
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8001
+          initialDelaySeconds: 15
+          periodSeconds: 10
