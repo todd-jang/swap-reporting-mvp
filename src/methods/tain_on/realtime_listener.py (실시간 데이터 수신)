@@ -1,0 +1,39 @@
+# swap_reporting_mvp/tain_on/realtime_listener.py
+
+# Vo fep로부터 실시간 스트림 데이터를 수신하는 로직.
+# (아키텍처 다이어그램의 'Vo fep' -> 'stream' -> 'TainOn' 관련)
+# 이 부분은 스트림 수신 방식 (TCP, UDP, 메시지 큐 등)에 따라 크게 달라집니다.
+# 여기서는 간단한 가상 수신 함수와 처리 로직 호출을 예시합니다.
+
+# 가상 프로세서 메소드 임포트
+from . import tain_on as realtime_processor # 가상 메소드 포함 모듈
+# from your_stream_library import StreamListener # 스트림 수신 라이브러리 임포트 가정
+
+def handle_incoming_realtime_stream(stream_data_chunk):
+    """
+    수신된 실시간 스트림 데이터 청크를 처리합니다.
+    """
+    # 스트림 데이터 파싱 및 레코드 단위 분리 로직 필요
+    # 예: 각 라인이 하나의 레코드라고 가정
+    records = stream_data_chunk.strip().split('\n')
+    processed_results = []
+
+    for record_line in records:
+        if not record_line: continue
+        # TODO: 실제 실시간 레코드 파싱 로직 구현
+        # parsed_record = parse_realtime_record(record_line) # 가상 파싱 함수 호출
+        parsed_record = {"UNIQUE_ID": f"rt_{record_line[:10]}", "data": record_line} # 가상 파싱 결과
+
+        # 가상 실시간 데이터 처리 메소드 호출
+        result = realtime_processor.process_realtime_swap_data(parsed_record)
+        processed_results.append(result)
+        print(f"Realtime Listener: 레코드 처리 결과 - {result}")
+
+    return processed_results
+
+
+# 실제 스트림 리스너는 백그라운드 서비스로 동작합니다.
+# 예:
+# listener = StreamListener("stream_source_address")
+# listener.on_data_received = handle_incoming_realtime_stream # 데이터 수신 시 콜백 함수 등록
+# listener.start() # 리스너 시작
