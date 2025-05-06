@@ -1,0 +1,74 @@
+# swap_reporting_mvp/vo_api_svr/main.py
+
+# Vo API 서버의 FastAPI 애플리케이션 정의 및 엔드포인트.
+# (아키텍처 다이어그램의 'api', 'Vo api svr' 관련)
+from fastapi import FastAPI, HTTPException, Depends, Header
+from typing import Optional
+from datetime import date # 날짜 관련 파라미터를 위해
+# 가상 메소드 및 예외 임포트
+from . import vo_api_svr as vo_svr # 가상 메소드 포함 모듈
+# from vb_api_svr.main import get_current_user, get_current_admin_user # Vb api svr의 인증 의존성 재사용
+
+# TODO: 실제 Vb api svr의 인증 의존성 함수 임포트 (또는 별도 인증 모듈)
+# from your_auth_module import get_current_user, get_current_admin_user
+
+# 예시를 위해 가상 인증 의존성 함수 정의 (Vb api svr/main.py와 동일)
+def verify_id_token(token: str):
+    """가상 토큰 검증."""
+    if token and token.startswith("fake_token_"):
+        parts = token.split('_')
+        user = parts[2] if len(parts) > 2 else "unknown"
+        print(f"가상 토큰 검증 성공: 사용자 {user}")
+        return {"sub": user, "admin": user == "admin"}
+    print("가상 토큰 검증 실패")
+    return None
+
+def get_current_user(authorization: Optional[str] = Header(None)):
+    if authorization is None:
+        raise HTTPException(status_code=401, detail="Authentication credentials were not provided")
+    token = authorization.replace("Bearer ", "")
+    user_info = verify_id_token(token)
+    if user_info is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return user_info
+
+def get_current_admin_user(user_info: dict = Depends(get_current_user)):
+    if not user_info.get("admin", False):
+        raise HTTPException(status_code=403, detail="Admin privilege required")
+    return user_info
+
+
+app = FastAPI()
+
+@app.post("/report/trigger")
+def trigger_report(report_date: date, current_admin_user: dict = Depends(get_current_admin_user)):
+    """
+    보고서 생성 트리거 엔드포인트 (관리자 권한 필요).
+    (아키텍처 다이어그램의 'api' -> 'Vo api svr' -> 'TainBat'/'TainOn' 관련)
+    """
+    try:
+        # 가상 보고서 생성 트리거 메소드 호출
+        # report_criteria는 report_date 등을 포함할 수 있습니다.
+        result = vo_svr.trigger_report_generation(current_admin_user.get('token'), {"date": report_date}) # 토큰 전달
+        return result
+    except ReportError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to trigger report: {e}")
+    except Exception as e:
+         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+@app.get("/report/status/{report_id}")
+def get_report_status(report_id: str, current_user: dict = Depends(get_current_user)):
+    """
+    보고서 상태 조회 엔드포인트 (인증 필요).
+    (아키텍처 다이어그램의 'api' -> 'Vo api svr' -> 'DB' 관련)
+    """
+    try:
+        # 가상 보고서 상태 조회 메소드 호출
+        status_info = vo_svr.get_report_status(current_user.get('token'), report_id) # 토큰 전달
+        return status_info
+    except ReportError as e:
+        raise HTTPException(status_code=404, detail=str(e)) # 보고서를 찾을 수 없는 경우 404
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+# TODO: 여기에 Vo api svr의 다른 엔드포인트 추가 (예: 보고서 다운로드 등)
