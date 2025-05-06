@@ -1,0 +1,189 @@
+# tests/test_integration.py (강화)
+
+import pytest
+import requests
+import os
+import tempfile
+import datetime
+from unittest.mock import patch, MagicMock, call
+# Django 테스트 클라이언트 (Django 기반 API 서버 테스트 시 유용)
+from django.test import Client
+from django.urls import reverse
+from rest_framework import status # DRF 상태 코드 사용
+
+# 테스트 대상 구성 요소 모듈 임포트 (실제 경로 사용)
+# import vb_api_svr.main as vb_api
+# import vo_api_svr.main as vo_api
+# import tain_tube.runner as tain_tube_runner
+# import tain_bat.scheduler as tain_bat_scheduler
+# import tain_on.realtime_listener as tain_on_listener
+# import data_access.db as db_access # DB 연동 함수
+# import data_access.file_io as file_access # 파일 연동 함수
+
+# TODO: 실제 임포트 경로 사용 및 실제 예외 클래스 사용
+class AuthError(Exception): pass
+class PermissionError(Exception): pass
+class DataNotFoundError(Exception): pass
+class CftcValidationError(Exception): pass
+class ReportError(Exception): pass
+
+# 가상 구성 요소 객체 (pytest-mock 사용 시 mocker로 대체될 대상)
+class MockVbApiSvrMain:
+    def login_for_access_token(self, username, password): pass
+    def read_vb_data(self, data_id, current_user): pass
+
+class MockVoApiSvrMain:
+     def trigger_report(self, report_date, current_admin_user): pass
+     def get_report_status(self, report_id, current_user): pass
+
+class MockTainTubeRunner:
+     def check_and_process_incoming_files(self, base_dir): pass
+
+class MockTainBatScheduler:
+     def run_daily_batch(self, target_date): pass
+
+class MockTainOnListener:
+     def handle_incoming_realtime_stream(self, stream_data_chunk): pass
+
+# TODO: 실제 data_access 모듈의 함수를 모의하거나 실제 테스트 DB 사용
+
+class TestApiIntegration:
+    """
+    API 서비스 (Vb api svr, Vo api svr) 연동 테스트.
+    (아키텍처 다이어그램의 'api', 'jwt', 'Vb api svr', 'Vo api svr' 관련)
+    """
+    # Django 테스트 클라이언트를 사용하여 실제 엔드포인트에 요청을 보내는 테스트
+    # 앞서 test_integration.py에서 작성한 예시들을 여기에 포함시킵니다.
+
+    # 예시: Vb api svr의 인증 엔드포인트 호출 테스트
+    # @pytest.mark.django_db # Django 테스트 DB 사용 시 필요
+    # def test_auth_token_endpoint(self):
+    #     """/auth/token 엔드포인트에 올바른 정보로 요청 시 토큰을 반환하는지 테스트."""
+    #     client = Client()
+    #     url = reverse('auth_token') # 여러분의 urls.py에 정의된 이름
+    #     # POST 요청 데이터
+    #     login_data = {"username": "testuser", "password": "password123"}
+    #
+    #     response = client.post(url, data=login_data, format='json') # JSON 형식으로 POST
+    #
+    #     assert response.status_code == status.HTTP_200_OK
+    #     assert 'access_token' in response.json()
+    #     assert response.json()['token_type'] == 'bearer'
+
+    # TODO: Vb api svr, Vo api svr의 모든 엔드포인트에 대한 통합 테스트 추가 (인증, 권한, 데이터 전달/응답 확인)
+
+
+class TestDataFlowIntegration:
+    """
+    TainTube, TainBat, TainOn, 파일/DB 간의 데이터 흐름 연동 테스트.
+    (아키텍처 다이어그램의 모든 화살표 및 박스 관련)
+    """
+
+    # 예시: TainTube Runner -> TainTube Processor -> DB/파일 연동 통합 테스트
+    @pytest.mark.django_db # 실제 DB 사용 시
+    @patch('tain_tube.processor.process_incoming_data_file') # 핵심 처리 로직 모의 (내부 로직은 단위 테스트에서 검증)
+    @patch('os.path.exists', return_value=True) # 디렉터리가 존재한다고 모의
+    @patch('os.listdir', return_value=['file1.txt', 'file2.txt']) # 파일 목록을 모의
+    @patch('os.path.join') # 경로 결합 모의
+    def test_taintube_runner_processes_files(self, mock_join, mock_listdir, mock_exists, mock_processor):
+        """TainTube Runner가 디렉터리 파일을 확인하고 TainTube 프로세서를 호출하는지 테스트."""
+        # from tain_tube.runner import check_and_process_incoming_files
+        #
+        # # os.path.join 모의 시 반환 값 설정 (가상 파일 경로 생성)
+        # mock_join.side_effect = lambda dir, name: f"{dir}/{name}"
+        #
+        # result = check_and_process_incoming_files("/fake/data")
+        #
+        # # os.listdir가 올바른 경로로 호출되었는지 확인
+        # mock_listdir.assert_called_once_with("/fake/data/...") # 오늘의 날짜 포함 경로 검증 필요
+        #
+        # # TainTube 프로세서가 각 파일에 대해 호출되었는지 확인
+        # self.assertEqual(mock_processor.call_count, 2)
+        # mock_processor.assert_has_calls([call("/fake/data/.../file1.txt"), call("/fake/data/.../file2.txt")]) # 올바른 파일 경로 인자 검증
+
+        pass # TODO: 실제 TainTube Runner 통합 테스트 구현
+
+
+    # 예시: TainBat Scheduler -> TainBat Runner -> DB/파일 연동 통합 테스트
+    @pytest.mark.django_db # 실제 DB 사용 시
+    @patch('tain_bat.runner.run_daily_batch_processing') # TainBat Runner 핵심 함수 모의
+    def test_tainbat_scheduler_triggers_batch(self, mock_batch_runner):
+        """TainBat Scheduler가 지정된 날짜에 대해 배치 러너를 올바르게 호출하는지 테스트."""
+        # from tain_bat.scheduler import run_daily_batch
+        #
+        # target_date = datetime.date(2023, 1, 1)
+        #
+        # run_daily_batch(target_date)
+        #
+        # # TainBat Runner 함수가 올바른 날짜 인자로 호출되었는지 확인
+        # mock_batch_runner.assert_called_once_with(target_date)
+
+        pass # TODO: 실제 TainBat Scheduler 통합 테스트 구현
+
+
+    # 예시: TainOn 실시간 리스너 -> TainOn Processor 연동 통합 테스트
+    # Vo fep 로부터 수신된 스트림 데이터가 TainOn 프로세서로 전달되는지 테스트
+    @patch('tain_on.processor.process_realtime_swap_data') # TainOn 프로세서 함수 모의
+    def test_tainon_listener_handles_stream_data(self, mock_processor):
+        """TainOn Listener가 수신된 스트림 데이터를 파싱하고 TainOn 프로세서에 전달하는지 테스트."""
+        # from tain_on.realtime_listener import handle_incoming_realtime_stream
+        #
+        # stream_chunk = "record1_data\nrecord2_data\nrecord3_data" # 가상 입력 스트림 청크
+        #
+        # handle_incoming_realtime_stream(stream_chunk)
+        #
+        # # TainOn 프로세서가 각 레코드에 대해 호출되었는지 확인 (파싱 결과 인자로)
+        # self.assertEqual(mock_processor.call_count, 3)
+        # # TODO: 실제 파싱 결과 구조에 맞게 호출 인자 검증
+        # mock_processor.assert_any_call({"UNIQUE_ID": "rt_record1", "data": "record1_data"})
+        # mock_processor.assert_any_call({"UNIQUE_ID": "rt_record2", "data": "record2_data"})
+        # mock_processor.assert_any_call({"UNIQUE_ID": "rt_record3", "data": "record3_data"})
+
+        pass # TODO: 실제 TainOn Listener 통합 테스트 구현
+
+
+    # 예시: TainBat -> /data/.../send 파일 쓰기 연동 테스트
+    # @pytest.mark.django_db
+    # @patch('data_access.db.get_raw_data_for_batch', return_value=[...]) # DB 읽기 모의
+    # @patch('tain_bat.processor.process_and_aggregate', return_value=[...]) # 처리/집계 모의
+    # @patch('data_access.file_io.write_cftc_send_file') # 파일 쓰기 함수 모의
+    def test_tainbat_writes_send_file(self, mock_file_writer, mocker):
+        """TainBat 배치 처리가 완료된 데이터를 출력 파일에 올바르게 기록하는지 테스트."""
+        # from tain_bat.runner import run_daily_batch_processing
+        #
+        # process_date = datetime.date(2023, 1, 1)
+        # # ... (DB 읽기, 처리/집계 모의 설정) ...
+        #
+        # run_daily_batch_processing(process_date)
+        #
+        # # 파일 쓰기 함수가 올바른 날짜와 보고서 내용으로 호출되었는지 확인
+        # # mock_file_writer.assert_called_once_with(process_date, '예상 보고서 내용') # 예상 보고서 내용은 처리/집계 결과 기반
+
+        pass # TODO: 실제 TainBat 출력 파일 쓰기 통합 테스트 구현
+
+
+    # 예시: /data/.../send 파일 읽기 -> Vo fep -> 스트림 전송 연동 테스트
+    @patch('data_access.file_io.read_send_file') # 파일 읽기 함수 모의
+    @patch('vo_fep.stream_sender.send_data_stream') # 스트림 전송 함수 모의
+    def test_vo_fep_reads_send_file_and_sends_stream(self, mock_stream_sender, mock_file_reader):
+        """Vo fep가 전송 파일을 읽어 스트림으로 전송하는지 테스트."""
+        # from vo_fep.runner import run_vo_fep_send # Vo fep 실행 함수 가정
+        #
+        # send_date = datetime.date(2023, 1, 1)
+        # file_content = "formatted_record1\nformatted_record2" # 전송 파일 내용 모의
+        #
+        # # 파일 읽기 함수가 내용을 반환하도록 설정
+        # mock_file_reader.return_value = file_content
+        #
+        # # run_vo_fep_send(send_date) # Vo fep 실행
+        #
+        # # 파일 읽기 함수가 올바른 날짜로 호출되었는지 확인
+        # # mock_file_reader.assert_called_once_with(send_date)
+        #
+        # # 스트림 전송 함수가 파일 내용으로 호출되었는지 확인
+        # # mock_stream_sender.assert_called_once_with(file_content)
+
+        pass # TODO: 실제 Vo fep 파일 읽기 및 스트림 전송 통합 테스트 구현
+
+
+    # TODO: 아키텍처 다이어그램의 다른 모든 연동 지점에 대한 통합 테스트 추가
