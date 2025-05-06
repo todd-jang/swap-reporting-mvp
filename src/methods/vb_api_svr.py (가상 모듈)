@@ -1,0 +1,55 @@
+# swap_reporting_mvp/vb_api_svr.py (가상 모듈)
+
+# 이 파일은 Vb api svr의 가상 메소드를 정의합니다.
+# 실제 프로젝트에서는 FastAPI 앱 또는 Django Viewset 등으로 구현될 것입니다.
+
+import time
+import jwt # 인증 관련 메소드를 위해 필요
+
+class AuthError(Exception): pass
+class PermissionError(Exception): pass
+class DataNotFoundError(Exception): pass
+
+def authenticate_user(username, password):
+    """
+    가상 사용자 인증 메소드. 성공 시 JWT 토큰을 반환합니다.
+    (아키텍처 다이어그램의 'jwt', 'Vb api svr' 관련)
+    """
+    print(f"가상 인증 시도: 사용자 '{username}'")
+    # TODO: 실제 사용자 인증 로직 구현 (DB 조회, 비밀번호 확인 등)
+    if username == "testuser" and password == "password123":
+        # 가상 토큰 생성 (실제로는 jwt 라이브러리 사용하여 서명)
+        payload = {"sub": username, "exp": int(time.time()) + 3600, "admin": False}
+        # 실제는 여기서 settings의 SECRET_KEY 또는 비공개 키로 토큰 서명
+        token = f"fake_token_for_{username}_{int(time.time())}"
+        print("가상 인증 성공, 토큰 반환")
+        return token
+    elif username == "admin" and password == "admin123":
+         payload = {"sub": username, "exp": int(time.time()) + 3600, "admin": True}
+         token = f"fake_token_for_{username}_{int(time.time())}"
+         print("가상 인증 성공 (관리자), 토큰 반환")
+         return token
+    else:
+        print("가상 인증 실패")
+        raise AuthError("인증 정보가 잘못되었습니다.")
+
+def get_vb_data(token, data_id):
+    """
+    가상 Vb 데이터 조회 메소드 (인증 필요).
+    (아키텍처 다이어그램의 'Vb api svr' -> 'DB' 관련)
+    """
+    print(f"가상 Vb 데이터 조회 시도: token={token[:10]}..., data_id={data_id}")
+    # TODO: 실제 토큰 검증 및 권한 확인 로직 구현
+    # verify_result = verify_id_token(token) # 앞서 논의한 verify_id_token 함수 호출
+    # if not verify_result or not verify_result.get('sub'):
+    #     raise AuthError("유효하지 않은 토큰입니다.")
+
+    # TODO: 실제 데이터베이스 조회 로직 구현 (TB_ON_MST, TB_ON_HIST 등)
+    if data_id == "vb-data-123":
+        print("가상 Vb 데이터 조회 성공")
+        return {"id": data_id, "value": 100, "source": "Vb"}
+    else:
+        print("가상 Vb 데이터 조회 실패")
+        raise DataNotFoundError(f"데이터를 찾을 수 없습니다: {data_id}")
+
+# TODO: 여기에 Vb api svr의 다른 메소드 추가 (예: 데이터 등록, 수정 등)
