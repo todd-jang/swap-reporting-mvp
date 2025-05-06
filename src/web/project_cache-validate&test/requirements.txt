@@ -2,3 +2,4 @@ PyJWT
 PyJWK 
 requests
 django
+python-decouple
