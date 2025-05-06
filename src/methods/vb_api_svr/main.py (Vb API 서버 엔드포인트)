@@ -1,0 +1,83 @@
+# swap_reporting_mvp/vb_api_svr/main.py
+
+# Vb API 서버의 FastAPI 애플리케이션 정의 및 엔드포인트.
+# (아키텍처 다이어그램의 'api', 'Vb api svr' 관련)
+from fastapi import FastAPI, HTTPException, Depends, Header
+from typing import Optional
+# 가상 메소드 및 예외 임포트
+from . import vb_api_svr as vb_svr # 가상 메소드 포함 모듈
+from .vb_api_svr import AuthError, PermissionError, DataNotFoundError
+
+# TODO: 실제 인증 토큰 검증 함수 임포트 및 사용
+# from my_django_project.auth.token_verification import verify_id_token as actual_verify_token
+
+# 예시를 위해 가상 검증 함수 정의
+def verify_id_token(token: str):
+    """가상 토큰 검증 (실제 verify_id_token 함수 호출)."""
+    # 실제 verify_id_token 함수를 호출하거나, 여기서 간단한 검증 로직 수행
+    if token and token.startswith("fake_token_"):
+        # 토큰에서 사용자 정보 추출 (예: fake_token_for_testuser_...)
+        parts = token.split('_')
+        user = parts[2] if len(parts) > 2 else "unknown"
+        # 실제 검증에서는 서명, 만료일 등을 확인하고 페이로드를 반환
+        print(f"가상 토큰 검증 성공: 사용자 {user}")
+        return {"sub": user, "admin": user == "admin"} # 가상 페이로드 반환
+    print("가상 토큰 검증 실패")
+    return None
+
+# 의존성 주입 함수: 토큰 검증 및 사용자 정보 반환
+def get_current_user(authorization: Optional[str] = Header(None)):
+    """Authorization 헤더에서 토큰을 추출하고 검증하여 사용자 정보 반환."""
+    if authorization is None:
+        raise HTTPException(status_code=401, detail="Authentication credentials were not provided")
+
+    token = authorization.replace("Bearer ", "")
+    user_info = verify_id_token(token) # 가상 검증 함수 호출 (실제는 actual_verify_token 사용)
+
+    if user_info is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    return user_info # 검증된 사용자 정보 (딕셔너리 형태 가정)
+
+# 의존성 주입 함수: 관리자 권한 확인
+def get_current_admin_user(user_info: dict = Depends(get_current_user)):
+    """현재 사용자가 관리자인지 확인."""
+    if not user_info.get("admin", False):
+        raise HTTPException(status_code=403, detail="Admin privilege required")
+    return user_info # 관리자인 경우 사용자 정보 반환
+
+
+app = FastAPI()
+
+@app.post("/auth/token")
+def login_for_access_token(username: str, password: str):
+    """
+    사용자 인증 엔드포인트.
+    (아키텍처 다이어그램의 'api' -> 'Vb api svr' 관련)
+    """
+    try:
+        # 가상 인증 메소드 호출 (실제 authenticate_user 함수 호출)
+        token = vb_svr.authenticate_user(username, password)
+        return {"access_token": token, "token_type": "bearer"}
+    except AuthError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+
+@app.get("/vb/data/{data_id}")
+def read_vb_data(data_id: str, current_user: dict = Depends(get_current_user)):
+    """
+    Vb 데이터 조회 엔드포인트 (인증 필요).
+    (아키텍처 다이어그램의 'api' -> 'Vb api svr' -> 'DB' 관련)
+    """
+    try:
+        # 가상 Vb 데이터 조회 메소드 호출
+        data = vb_svr.get_vb_data(current_user.get('token'), data_id) # 토큰 또는 사용자 정보 전달
+        return data
+    except DataNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
+
+# TODO: 여기에 Vb api svr의 다른 엔드포인트 추가
