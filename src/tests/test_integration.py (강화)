@@ -1,0 +1,213 @@
+# tests/test_integration.py
+
+import pytest
+# import requests # HTTP 요청 시뮬레이션에 사용
+import os
+import tempfile
+from unittest.mock import patch, MagicMock, call
+# Django 테스트 클라이언트 (Django 기반 API 서버 테스트 시 유용)
+from django.test import Client
+from django.urls import reverse
+from rest_framework import status # DRF 상태 코드 사용
+
+# 테스트 대상 구성 요소 모듈 임포트 (실제 경로 사용)
+# import vb_api_svr
+# import vo_api_svr
+# import tain_tube
+# import tain_bat
+# import tain_on
+# from your_db_layer import get_trade_record, get_raw_data_by_date # DB 연동 함수 임포트 가정
+
+
+# TODO: 실제 임포트 경로 사용 및 실제 예외 클래스 사용
+class AuthError(Exception): pass
+class PermissionError(Exception): pass
+class DataNotFoundError(Exception): pass
+class CftcValidationError(Exception): pass
+class ReportError(Exception): pass
+
+# 가상 구성 요소 객체 (pytest-mock 사용 시 mocker로 대체될 대상)
+class MockVbApiSvr:
+    def authenticate_user(self, username, password): pass
+    def get_vb_data(self, token, data_id): pass
+
+class MockVoApiSvr:
+    def trigger_report_generation(self, token, report_criteria): pass
+    def get_report_status(self, token, report_id): pass
+
+class MockTainTube:
+     def process_incoming_data_file(self, file_path): pass
+
+class MockTainBat:
+     def run_daily_batch_processing(self, process_date): pass
+
+class MockTainOn:
+     def generate_on_demand_report(self, report_criteria): pass
+
+class TestApiIntegration:
+    """
+    API 서비스 (Vb api svr, Vo api svr, TainWeb) 연동 테스트.
+    (아키텍처 다이어그램의 'api', 'jwt', 'Vb api svr', 'Vo api svr', 'TainWeb' 관련)
+    """
+    # @pytest.fixture # fixture를 사용하여 공통 설정 또는 객체 생성 가능
+    # def api_client(self):
+    #     # Django 테스트 클라이언트 또는 requests.Session 등을 설정
+    #     return Client() # Django 테스트 클라이언트 예시
+
+    # 기존 인증 통합 테스트 예시 유지 및 보강
+    # ... (test_admin_api_access_with_admin_token 등) ...
+
+    # 예시: Vb api svr에서 데이터 조회 API 호출 테스트 (인증/권한 포함)
+    # @pytest.mark.django_db # Django 테스트 클라이언트 사용 시 필요
+    # @patch('vb_api_svr.auth.token_verification.verify_id_token', return_value={"sub": "testuser", "admin": False}) # 인증 성공 모의
+    # @patch('your_db_layer.get_trade_record', return_value={"id": "vb-data-123", "value": 100}) # DB 조회 함수 모의
+    def test_get_vb_data_api_success(self, mocker):
+        """Vb api svr의 데이터 조회 API 호출 성공 테스트."""
+        # client = self.api_client() # fixture 사용 예시
+        # data_id = "vb-data-123"
+        # token = "fake_valid_token"
+        # headers = {'Authorization': f'Bearer {token}'} # requests 사용 시 헤더 형식
+
+        # # Django 테스트 클라이언트 사용 시:
+        # client = Client()
+        # headers = {'HTTP_AUTHORIZATION': f'Bearer {token}'}
+        # url = reverse('vb_data_api', args=[data_id]) # Vb 데이터 조회 API URL (여러분의 urls.py에 맞게 수정)
+        # response = client.get(url, **headers)
+        # assert response.status_code == status.HTTP_200_OK
+        # assert response.json()['id'] == data_id
+
+        pass # TODO: 실제 API 엔드포인트 통합 테스트 구현
+
+
+    # 예시: Vo api svr의 보고서 생성 트리거 API 호출 테스트 (인증/권한 포함)
+    # @pytest.mark.django_db
+    # @patch('vo_api_svr.auth.token_verification.verify_id_token_and_check_admin', return_value={"sub": "admin", "admin": True}) # 관리자 인증 통과 모의
+    # @patch('vo_api_svr.reporting_logic.trigger_report_generation_process') # 실제 보고서 생성 프로세스 트리거 함수 모의
+    def test_trigger_report_api_success(self, mocker):
+        """Vo api svr의 보고서 생성 트리거 API 호출 성공 테스트."""
+        # client = Client()
+        # url = reverse('trigger_report_api') # 보고서 생성 트리거 API URL
+        # admin_token = "fake_admin_token"
+        # headers = {'HTTP_AUTHORIZATION': f'Bearer {admin_token}'}
+        # report_criteria = {"date": "2023-01-01"}
+        #
+        # mock_trigger_func = mocker.patch('vo_api_svr.reporting_logic.trigger_report_generation_process')
+        # mock_trigger_func.return_value = {"report_id": "report_abc", "status": "accepted"}
+        #
+        # response = client.post(url, data=report_criteria, **headers) # POST 요청
+        # assert response.status_code == status.HTTP_202_ACCEPTED # 202 Accepted 예상
+        # assert response.json()['report_id'] == "report_abc"
+        #
+        # mock_trigger_func.assert_called_once_with(report_criteria) # 트리거 함수가 올바른 기준으로 호출되었는지 확인
+
+        pass # TODO: 실제 Vo api svr 보고서 트리거 API 통합 테스트 구현
+
+
+class TestDataFlowIntegration:
+    """
+    TainTube, TainBat, TainOn, 파일/DB 간의 데이터 흐름 연동 테스트.
+    (아키텍처 다이어그램의 모든 화살표 및 박스 관련)
+    """
+
+    # 예시: TainTube를 통한 입력 파일 처리 및 DB/파일 저장 통합 테스트
+    # /data/yyyymmdd/rec 에서 TainTube -> DB (TB_BAT_FILE_MST 등) 및 파일 저장
+    @pytest.mark.django_db # 실제 DB 사용 시
+    @patch('tain_tube.validation.cftc_validate_record', return_value=True) # 유효성 검증 성공으로 모의
+    @patch('tain_tube.data_parser.parse_cftc_line') # 파싱 함수 모의
+    # 실제 DB 저장 함수 또는 모의 객체
+    # @patch('your_db_layer.save_raw_cftc_record')
+    # 실제 파일 쓰기 함수 또는 모의 객체
+    # @patch('tain_tube.file_writer.append_to_raw_file')
+    def test_taintube_file_ingestion_to_db_and_file(self, mocker):
+        """TainTube가 입력 파일을 읽어 파싱, 검증 후 DB와 파일에 저장하는지 테스트."""
+        # from tain_tube.processor import process_incoming_data_file # TainTube 파일 처리 함수
+
+        # 테스트에 사용할 입력 파일 내용
+        input_file_content = "ID1|20230101|100.50|...\nID2|20230101|200.75|..."
+        # 파싱 함수가 반환할 예상 데이터
+        parsed_data_list = [{"UNIQUE_ID":"ID1", "TRADE_DATE": datetime.date(2023, 1, 1), ...}, {"UNIQUE_ID":"ID2", "TRADE_DATE": datetime.date(2023, 1, 1), ...}]
+
+        # 파싱 함수가 라인별로 예상 데이터를 반환하도록 설정
+        # mock_parser.side_effect = parsed_data_list # mock_parser는 process_incoming_data_file 내에서 호출되는 parse_cftc_line 모의
+
+        # 임시 입력 파일 생성
+        with tempfile.NamedTemporaryFile(mode='w+', delete=False, prefix="cftc_test_") as tmp_file:
+            tmp_file.write(input_file_content)
+            tmp_file_path = tmp_file.name
+
+        # TainTube 파일 처리 함수 호출
+        # process_incoming_data_file(tmp_file_path)
+
+        # DB 저장 함수가 예상 데이터로 호출되었는지 확인
+        # mock_db_writer.assert_has_calls([call(parsed_data_list[0]), call(parsed_data_list[1])])
+
+        # 파일 쓰기 함수가 호출되고 내용이 올바른지 확인 (모의 객체 또는 실제 임시 파일 검증)
+        # mock_file_writer.assert_called_once_with(..., input_file_content)
+
+        # 임시 파일 정리
+        os.unlink(tmp_file_path)
+
+        pass # TODO: 실제 TainTube 통합 테스트 구현
+
+
+    # 예시: TainBat 배치 처리 -> DB/파일 저장 통합 테스트
+    # DB에서 원본 데이터 읽기 -> TainBat 처리 -> DB (집계 데이터) 및 /data/yyyymmdd/send 파일 생성
+    @pytest.mark.django_db # 실제 DB 사용 시
+    # 실제 DB 읽기 함수 또는 모의 객체
+    # @patch('your_db_layer.get_raw_data_for_batch')
+    # @patch('tain_bat.processor.process_and_aggregate') # TainBat 핵심 처리/집계 로직 모의
+    # 실제 DB 저장 함수 또는 모의 객체
+    # @patch('your_db_layer.save_aggregated_data')
+    # 실제 출력 파일 쓰기 함수 또는 모의 객체
+    # @patch('tain_bat.file_writer.write_cftc_send_file')
+    def test_tainbat_batch_to_db_and_send_file(self, mocker):
+        """TainBat 배치 처리 결과가 DB와 출력 파일에 올바르게 저장되는지 테스트."""
+        # from tain_bat.runner import run_daily_batch_processing
+        #
+        # process_date = datetime.date(2023, 1, 1)
+        # raw_data_from_db = [{"id":"1", "price":100}, {"id":"2", "price":200}] # DB에서 읽을 데이터 모의
+        # aggregated_result = [{"group":"A", "sum_price":300}] # 처리/집계 결과 모의
+        #
+        # # DB 읽기 함수가 데이터를 반환하도록 설정
+        # # mock_db_reader.return_value = raw_data_from_db
+        #
+        # # TainBat 핵심 처리 함수가 결과를 반환하도록 설정
+        # # mock_processor.return_value = aggregated_result
+        #
+        # # run_daily_batch_processing(process_date) # TainBat 실행
+        #
+        # # DB 저장 함수가 집계 결과로 호출되었는지 확인
+        # # mock_db_writer.assert_called_once_with(aggregated_result)
+        #
+        # # 출력 파일 쓰기 함수가 호출되고 내용이 올바른지 확인 (모의 객체 또는 실제 임시 파일 검증)
+        # # mock_file_writer.assert_called_once_with(f"/data/{process_date.strftime('%Y%m%d')}/send/report.txt", ...)
+
+        pass # TODO: 실제 TainBat 통합 테스트 구현
+
+
+    # 예시: Vo fep 스트림 출력 연동 테스트
+    # /data/yyyymmdd/send 파일에서 Vo fep -> stream
+    @patch('vo_fep.file_reader.read_send_file') # 출력 파일 읽기 모의
+    @patch('vo_fep.stream_sender.send_data_stream') # 스트림 전송 모의
+    def test_vo_fep_reads_file_and_sends_stream(self, mock_stream_sender, mock_file_reader):
+        """Vo fep가 출력 파일을 읽어 스트림으로 전송하는지 테스트."""
+        # from vo_fep.runner import run_vo_fep_send # Vo fep 실행 함수 가정
+        #
+        # send_date = datetime.date(2023, 1, 1)
+        # file_content_to_send = "formatted_record1\nformatted_record2\n" # 출력 파일 내용 모의
+        #
+        # # 출력 파일 읽기 함수가 내용을 반환하도록 설정
+        # mock_file_reader.return_value = file_content_to_send
+        #
+        # # run_vo_fep_send(send_date) # Vo fep 실행
+        #
+        # # 파일 읽기 함수가 올바른 경로로 호출되었는지 확인
+        # # mock_file_reader.assert_called_once_with(f"/data/{send_date.strftime('%Y%m%d')}/send/report.txt")
+        #
+        # # 스트림 전송 함수가 파일 내용으로 호출되었는지 확인
+        # # mock_stream_sender.assert_called_once_with(file_content_to_send)
+
+        pass # TODO: 실제 Vo fep 스트림 출력 통합 테스트 구현
+
+
+    # TODO: 클러스터 내부/간 통신, TainWeb DB 연동 등 아키텍처 상의 다른 통합 테스트 추가
