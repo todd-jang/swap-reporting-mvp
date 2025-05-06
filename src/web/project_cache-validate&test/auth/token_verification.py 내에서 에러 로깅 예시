@@ -1,0 +1,12 @@
+# my_django_project/auth/token_verification.py 내에서 에러 로깅 예시
+
+    except jwt.ExpiredSignatureError:
+        logger.warning(f"ID Token expired for token starting with {id_token[:10]}...") # 토큰 전체 로깅은 보안상 위험
+        raise
+    except jwt.InvalidAudienceError:
+        audience = getattr(settings, 'AUTH_AUDIENCE', 'N/A')
+        logger.warning(f"Invalid Audience for token starting with {id_token[:10]}... Expected: {audience}")
+        raise
+    except Exception as e:
+        logger.exception(f"An unexpected error occurred during token verification for token starting with {id_token[:10]}...:")
+        raise Exception(f"Token verification failed due to an unexpected error: {e}")
