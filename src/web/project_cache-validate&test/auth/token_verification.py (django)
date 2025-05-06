@@ -1,0 +1,130 @@
+# my_django_project/auth/token_verification.py
+
+import jwt
+from jwk import PyJWKClient
+from django.conf import settings
+import logging
+
+# 로거 설정
+logger = logging.getLogger(__name__)
+
+# --- JWK 클라이언트 설정 (애플리케이션 초기화 시 한 번만 실행) ---
+# settings에서 JWKS URL을 가져와 PyJWKClient 인스턴스 생성
+try:
+    jwks_url = getattr(settings, 'AUTH_JWKS_URL', None)
+    if not jwks_url:
+        logger.error("AUTH_JWKS_URL is not set in settings.")
+        # 실제 운영 환경에서는 이 시점에 애플리케이션 시작을 중단해야 할 수도 있습니다.
+        # 여기서는 오류 로깅만 하고 None으로 둡니다.
+        jwk_client = None
+    else:
+        # PyJWKClient는 내부적으로 JWKS를 가져오고 캐싱합니다.
+        # 이 인스턴스는 애플리케이션 생명주기 동안 재사용됩니다.
+        jwk_client = PyJWKClient(jwks_url)
+        logger.info(f"JWK Client created for URL: {jwks_url}")
+
+except Exception as e:
+    logger.exception("Error creating PyJWKClient:")
+    jwk_client = None
+    # JWKS 엔드포인트 접근 문제 등 초기화 실패 시 처리
+
+# --- 커스텀 예외 정의 ---
+# 관리자 권한이 없을 때 발생시킬 예외
+class AdminPrivilegeRequiredError(PermissionError):
+    """Raises when admin privilege is required but not found."""
+    pass
+
+# --- ID 토큰 검증 및 관리자 권한 확인 함수 ---
+def verify_id_token_and_check_admin(id_token: str) -> dict:
+    """
+    ID 토큰을 검증하고, 유효한 경우 관리자 권한을 확인합니다.
+
+    Args:
+        id_token: 클라이언트로부터 받은 ID 토큰 문자열.
+
+    Returns:
+        검증된 토큰의 페이로드(클레임) 딕셔너리.
+
+    Raises:
+        ValueError: ID 토큰이 제공되지 않았거나 형식이 잘못된 경우.
+        jwt.PyJWTError: jwt 라이브러리 관련 검증 오류 (만료, 서명 오류 등).
+        AdminPrivilegeRequiredError: 관리자 권한이 없는 경우.
+        Exception: 서명 키 가져오기 또는 기타 예상치 못한 오류.
+    """
+    if not id_token:
+        logger.warning("ID Token is missing.")
+        raise ValueError("ID Token is missing.")
+
+    if jwk_client is None:
+         logger.error("JWK Client was not initialized successfully.")
+         raise Exception("Authentication service is not available.")
+
+    signing_key = None
+    try:
+        # 토큰 헤더에서 kid를 추출하여 해당 서명 키를 PyJWKClient로부터 가져옵니다.
+        signing_key = jwk_client.get_signing_key_from_jwt(id_token)
+        logger.debug(f"Signing key obtained using kid: {signing_key.kid}")
+
+    except Exception as e:
+        logger.exception("Error getting signing key for ID token:")
+        # 서명 키를 가져오는데 실패한 경우
+        raise Exception("Failed to get signing key for ID token.") from e
+
+    try:
+        # settings에서 설정을 가져와 PyJWT 검증에 사용합니다.
+        audience = getattr(settings, 'AUTH_AUDIENCE', None)
+        issuer = getattr(settings, 'AUTH_ISSUER', None)
+        algorithms = getattr(settings, 'AUTH_TOKEN_ALGORITHMS', ["RS256"]) # 기본값
+
+        if not audience or not issuer:
+             logger.error("AUTH_AUDIENCE or AUTH_ISSUER not set in settings.")
+             raise Exception("Authentication settings are incomplete.")
+
+
+        # PyJWT를 사용하여 토큰의 서명 및 표준 클레임을 검증합니다.
+        payload = jwt.decode(
+            id_token,
+            signing_key.public_key, # PyJWKClient에서 가져온 공개 키 사용
+            algorithms=algorithms,
+            audience=audience,
+            issuer=issuer,
+            options={"verify_signature": True, "verify_exp": True, "verify_aud": True, "verify_iss": True}
+        )
+        logger.info(f"ID Token successfully verified for user: {payload.get('sub')}")
+
+        # --- 관리자 권한 확인 (커스텀 클레임 기반) ---
+        admin_claim_name = getattr(settings, 'AUTH_ADMIN_CLAIM_NAME', 'admin')
+        if payload.get(admin_claim_name) is True:
+            logger.info("User has admin privilege.")
+            return payload
+        else:
+            logger.warning(f"User {payload.get('sub')} does not have admin privilege.")
+            # 관리자가 아닌 경우 커스텀 예외 발생
+            raise AdminPrivilegeRequiredError("Admin privilege required.")
+
+    except jwt.ExpiredSignatureError:
+        logger.warning("ID Token has expired.")
+        raise
+    except jwt.InvalidAudienceError:
+        logger.warning(f"Invalid Audience. Expected: {audience}")
+        raise
+    except jwt.InvalidIssuerError:
+         logger.warning(f"Invalid Issuer. Expected: {issuer}")
+         raise
+    except jwt.InvalidSignatureError:
+        logger.warning("ID Token signature is invalid.")
+        raise
+    except jwt.DecodeError as e:
+        logger.warning(f"Error decoding ID Token: {e}")
+        raise
+    except AdminPrivilegeRequiredError:
+         # 관리자 권한 없음 예외는 여기서 다시 발생시킵니다.
+         raise
+    except Exception as e:
+        # 예상치 못한 다른 모든 오류 처리
+        logger.exception("An unexpected error occurred during token verification:")
+        raise Exception(f"Token verification failed due to an unexpected error: {e}")
+
+# 참고: WSGI.py는 Django 애플리케이션 인스턴스를 로드하는 역할을 합니다.
+# 위의 PyJWKClient 인스턴스 생성 코드는 이 token_verification.py 모듈이
+# Django 애플리케이션 로딩 과정(wsgi.py에 의해 시작되는)의 일부로 임포트될 때 실행됩니다.
