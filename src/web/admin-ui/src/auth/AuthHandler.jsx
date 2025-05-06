@@ -1,7 +1,10 @@
 // AuthHandler.jsx
-import React, { useEffect } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom'; // react-router-dom 사용 가정
+import React, { useEffect, useState, useContext } from 'react'; // useContext import
+import { useLocation, useNavigate } from 'react-router-dom';
 import { generatePkceCodes } from './pkceUtils';
+
+// TODO: Context API를 사용하여 인증 상태를 관리하는 경우 import
+// import { AuthContext } from './AuthContext';
 
 // OAuth 설정 (실제 값으로 대체 필요)
 const OAUTH_CONFIG = {
@@ -9,118 +12,204 @@ const OAUTH_CONFIG = {
   redirectUri: 'YOUR_REDIRECT_URI', // 예: 'http://localhost:3000/callback'
   authorizationEndpoint: 'YOUR_AUTH_SERVER_AUTHORIZATION_ENDPOINT',
   tokenEndpoint: 'YOUR_AUTH_SERVER_TOKEN_ENDPOINT',
-  scope: 'openid profile email', // 필요한 스코프 설정
-  // state 값은 CSRF 방지를 위해 요청마다 고유하게 생성하고 저장 후 검증 필요
-  // 여기서는 간단히 예시로 'random_state_string' 사용
-  // 실제 앱에서는 generateRandomString 등으로 생성하고 sessionStorage에 저장 후 리디렉션 시 검증해야 함
-  state: 'random_state_string',
+  scope: 'openid profile email offline_access', // Refresh Token을 받으려면 'offline_access' 스코프 요청 필요
 };
 
-// code_verifier 저장을 위한 sessionStorage 키
+// 토큰 저장을 위한 sessionStorage 키
 const PKCE_VERIFIER_STORAGE_KEY = 'pkce_code_verifier';
-const OAUTH_STATE_STORAGE_KEY = 'oauth_state'; // state 저장을 위한 키
+const OAUTH_STATE_STORAGE_KEY = 'oauth_state';
+const ACCESS_TOKEN_STORAGE_KEY = 'access_token';
+const ID_TOKEN_STORAGE_KEY = 'id_token';
+const REFRESH_TOKEN_STORAGE_KEY = 'refresh_token';
+
 
 function AuthHandler() {
   const location = useLocation();
   const navigate = useNavigate();
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // TODO: Context API를 사용하는 경우
+  // const { setTokens, clearTokens } = useContext(AuthContext);
+
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const code = params.get('code');
-    const error = params.get('error');
+    const errorParam = params.get('error');
     const receivedState = params.get('state');
 
     // 리디렉션 처리
-    if (code) {
-      console.log('Authorization Code Received:', code);
+    if (location.pathname === new URL(OAUTH_CONFIG.redirectUri).pathname) {
+        if (code) {
+          console.log('Authorization Code Received:', code);
 
-      // 1. state 검증
-      const storedState = sessionStorage.getItem(OAUTH_STATE_STORAGE_KEY);
-      sessionStorage.removeItem(OAUTH_STATE_STORAGE_KEY); // 사용 후 삭제
-      if (receivedState !== storedState) {
-        console.error('State mismatch. Potential CSRF attack.');
-        // 에러 처리 로직 (예: 에러 페이지로 이동)
-        navigate('/error?message=State mismatch');
-        return;
-      }
+          // 1. state 검증
+          const storedState = sessionStorage.getItem(OAUTH_STATE_STORAGE_KEY);
+          sessionStorage.removeItem(OAUTH_STATE_STORAGE_KEY);
 
-      // 2. code_verifier 가져오기
-      const code_verifier = sessionStorage.getItem(PKCE_VERIFIER_STORAGE_KEY);
-      sessionStorage.removeItem(PKCE_VERIFIER_STORAGE_KEY); // 사용 후 삭제
+          if (!storedState || receivedState !== storedState) {
+            console.error('State mismatch. Potential CSRF attack.');
+            setError('로그인 요청이 유효하지 않습니다. 다시 시도해주세요.');
+            setIsLoading(false);
+            navigate('/error?message=State mismatch', { replace: true });
+            return;
+          }
 
-      if (!code_verifier) {
-        console.error('code_verifier not found in storage.');
-        // 에러 처리 로직
-        navigate('/error?message=PKCE verifier missing');
-        return;
-      }
+          // state 검증 통과
+          // 2. code_verifier 가져오기
+          const code_verifier = sessionStorage.getItem(PKCE_VERIFIER_STORAGE_KEY);
+          sessionStorage.removeItem(PKCE_VERIFIER_STORAGE_KEY);
 
-      // 3. Token Exchange Request 수행
-      exchangeCodeForTokens(code, code_verifier);
+          if (!code_verifier) {
+            console.error('code_verifier not found in storage.');
+             setError('보안 정보가 누락되었습니다. 다시 로그인해주세요.');
+             setIsLoading(false);
+            navigate('/error?message=PKCE verifier missing', { replace: true });
+            return;
+          }
 
-    } else if (error) {
-      console.error('OAuth Error:', error);
-      // 에러 처리 로직
-      navigate('/error?message=' + error);
+          // 3. Token Exchange Request 수행
+          exchangeCodeForTokens(code, code_verifier);
+
+        } else if (errorParam) {
+          console.error('OAuth Error:', errorParam);
+          setError(`로그인 중 오류가 발생했습니다: ${errorParam}`);
+          setIsLoading(false);
+          navigate(`/error?message=${errorParam}`, { replace: true });
+        } else {
+             console.log('Redirected to callback without code or error.');
+             setError('유효하지 않은 접근입니다.');
+             setIsLoading(false);
+             navigate('/', { replace: true });
+        }
+    } else {
+        // 콜백 경로가 아닌 경우 (예: 초기 로딩 또는 다른 페이지 접근)
+        setIsLoading(false); // 로딩 상태 해제
+        // TODO: 여기서는 토큰이 있는지 확인하고, 유효하면 세션을 유지하거나
+        //       필요하다면 Refresh Token으로 갱신을 시도하는 로직을 추가할 수 있습니다.
+        //       예: checkAndRefreshToken();
     }
-    // TODO: 토큰이 이미 있는 경우 처리 로직 추가
-    // TODO: 경로가 '/callback'이 아닌 다른 경로일 때의 초기 로딩 로직 추가
-  }, [location, navigate]); // location 또는 navigate 변경 시 effect 재실행
 
-  // Token Exchange Request 함수
+  }, [location, navigate]);
+
+  // Token Exchange Request 함수 (기존 코드)
   const exchangeCodeForTokens = async (code, code_verifier) => {
-    const tokenParams = new URLSearchParams();
-    tokenParams.append('grant_type', 'authorization_code');
-    tokenParams.append('client_id', OAUTH_CONFIG.clientId);
-    tokenParams.append('redirect_uri', OAUTH_CONFIG.redirectUri);
-    tokenParams.append('code', code);
-    tokenParams.append('code_verifier', code_verifier); // PKCE 핵심 파라미터
+      // ... (이전 코드와 동일)
+      try {
+          // ... fetch 요청 ...
+          const tokenData = await response.json();
 
-    try {
-      const response = await fetch(OAUTH_CONFIG.tokenEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: tokenParams.toString(),
-      });
+          // 4. 받은 토큰 저장 (Refresh Token 포함)
+          storeTokens(tokenData); // storeTokens 함수 호출
 
-      if (!response.ok) {
-        // 에러 응답 처리
-        const errorData = await response.json();
-        console.error('Token exchange failed:', errorData);
-        navigate('/error?message=Token exchange failed');
-        return;
+          // 5. 로그인 성공 후 리디렉션
+          setIsLoading(false);
+          navigate('/home', { replace: true });
+
+      } catch (err) {
+          // ... 에러 처리 ...
       }
-
-      const tokenData = await response.json();
-      console.log('Tokens received:', tokenData);
-
-      // 4. 받은 토큰 저장 (localStorage 또는 sessionStorage)
-      // 실제 앱에서는 보안 고려하여 적절한 저장소 선택 및 관리 필요
-      sessionStorage.setItem('access_token', tokenData.access_token);
-      sessionStorage.setItem('id_token', tokenData.id_token);
-      if (tokenData.refresh_token) {
-         sessionStorage.setItem('refresh_token', tokenData.refresh_token);
-      }
-
-      // 5. 로그인 성공 후 리디렉션 (예: 홈 페이지)
-      navigate('/home'); // 토큰 저장 후 이동할 경로
-
-    } catch (error) {
-      console.error('Error during token exchange:', error);
-      navigate('/error?message=Network error during token exchange');
-    }
   };
+
+  // 토큰 저장 함수 (Refresh Token 저장 로직 포함)
+  const storeTokens = (tokenData) => {
+      sessionStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, tokenData.access_token);
+      sessionStorage.setItem(ID_TOKEN_STORAGE_KEY, tokenData.id_token);
+      if (tokenData.refresh_token) {
+         sessionStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, tokenData.refresh_token);
+      }
+      // TODO: Context API를 사용하는 경우 setTokens(tokenData); 호출
+      // TODO: 토큰 만료 시간을 계산하여 함께 저장 (Optional, 하지만 권장)
+      // 예: const expiresInMs = tokenData.expires_in * 1000;
+      //     const expiresAt = Date.now() + expiresInMs;
+      //     sessionStorage.setItem('access_token_expires_at', expiresAt.toString());
+  };
+
+  // 토큰 삭제 함수
+  const clearTokens = () => {
+      sessionStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+      sessionStorage.removeItem(ID_TOKEN_STORAGE_KEY);
+      sessionStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+      // TODO: Context API를 사용하는 경우 clearTokens() 호출
+      // TODO: 만료 시간 관련 정보도 삭제
+      // sessionStorage.removeItem('access_token_expires_at');
+  };
+
+
+  // Access Token 갱신 함수 (새로 추가)
+  const refreshToken = async () => {
+      console.log('Attempting to refresh token...');
+      const currentRefreshToken = sessionStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
+
+      if (!currentRefreshToken) {
+          console.log('No refresh token available. User needs to re-authenticate.');
+          clearTokens(); // 혹시 모를 잔여 토큰 정리
+          navigate('/login', { replace: true }); // 로그인 페이지로 리디렉션
+          return null; // 갱신 실패
+      }
+
+      const tokenParams = new URLSearchParams();
+      tokenParams.append('grant_type', 'refresh_token');
+      tokenParams.append('client_id', OAUTH_CONFIG.clientId);
+      tokenParams.append('refresh_token', currentRefreshToken);
+      // NOTE: Refresh Token Grant에는 PKCE code_verifier가 필요 없습니다.
+      // tokenParams.append('scope', OAUTH_CONFIG.scope); // Optional: 갱신 시 스코프 재지정 (일반적으로는 원래 스코프 사용)
+
+      try {
+          const response = await fetch(OAUTH_CONFIG.tokenEndpoint, {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: tokenParams.toString(),
+          });
+
+          if (!response.ok) {
+              // Refresh Token 갱신 실패 (예: Refresh Token 만료 또는 취소)
+              const errorData = await response.json();
+              console.error('Refresh token failed:', errorData);
+              setError(`세션 만료: ${errorData.error_description || errorData.error || '다시 로그인해주세요.'}`);
+              clearTokens(); // 모든 토큰 삭제
+              navigate('/login', { replace: true }); // 로그인 페이지로 리디렉션
+              return null; // 갱신 실패
+          }
+
+          const tokenData = await response.json();
+          console.log('Tokens refreshed:', tokenData);
+
+          // 새로운 토큰 저장 (새 Refresh Token이 올 수도 있으므로 업데이트)
+          storeTokens(tokenData); // storeTokens 재사용
+
+          console.log('Token refresh successful.');
+          return tokenData.access_token; // 갱신된 Access Token 반환
+
+      } catch (err) {
+          console.error('Error during token refresh:', err);
+          setError(`세션 갱신 중 네트워크 오류: ${err.message}. 다시 로그인해주세요.`);
+          clearTokens();
+          navigate('/login', { replace: true });
+          return null; // 갱신 실패
+      }
+  };
+
+  // TODO: 이 refreshToken 함수는 API 호출 로직에서 Access Token이 만료되었을 때 호출되도록 연결해야 합니다.
+  //       예를 들어, API 요청을 보내는 axios interceptor 또는 fetch 래퍼 함수에서 401 에러를 감지하면 refreshToken 함수를 호출하고,
+  //       성공 시 원래 요청을 새로운 Access Token으로 재시도하는 로직을 구현합니다.
 
 
   return (
     <div>
-      {/* 로딩 스피너 등을 여기에 표시할 수 있습니다. */}
-      {location.pathname === new URL(OAUTH_CONFIG.redirectUri).pathname ? (
-        <p>로그인 처리 중...</p>
-      ) : (
-        <p>로그인 대기 중...</p> // 로그인 버튼 등을 표시할 컴포넌트
+      {isLoading && <p>로그인 처리 중...</p>}
+      {error && (
+        <div style={{ color: 'red' }}>
+          <p>{error}</p>
+          <button onClick={() => { setError(null); navigate('/login'); }}>다시 로그인</button> {/* 다시 로그인 버튼 추가 */}
+        </div>
+      )}
+      {/* 다른 경로에서의 상태 표시 (필요하다면) */}
+      {!isLoading && !error && location.pathname !== new URL(OAUTH_CONFIG.redirectUri).pathname && (
+          <p>인증 상태 확인 중...</p>
       )}
     </div>
   );
