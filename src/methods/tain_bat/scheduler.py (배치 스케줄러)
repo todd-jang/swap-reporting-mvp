@@ -1,0 +1,28 @@
+# swap_reporting_mvp/tain_bat/scheduler.py
+
+# TainBat의 일별 배치를 스케줄링하거나 트리거하는 로직.
+# (아키텍처 다이어그램의 'TainBat' 관련)
+import datetime
+# 가상 배치 실행 메소드 임포트
+from . import tain_bat as batch_runner # 가상 메소드 포함 모듈
+
+def run_daily_batch(target_date: datetime.date):
+    """
+    지정된 날짜에 대해 일별 배치 처리를 실행합니다.
+    """
+    print(f"TainBat Scheduler: 일별 배치 실행 시작 - 날짜: {target_date}")
+    try:
+        # 가상 일별 배치 실행 메소드 호출
+        result = batch_runner.run_daily_batch_processing(target_date)
+        print(f"TainBat Scheduler: 일별 배치 실행 완료 - 날짜: {target_date}, 결과: {result}")
+        # TODO: 배치 실행 결과 기록 또는 알림 로직 추가
+        return {"status": "success", "result": result}
+    except Exception as e:
+        print(f"TainBat Scheduler: 일별 배치 실행 실패 - 날짜: {target_date}, 오류: {e}")
+        # TODO: 오류 알림 또는 재시도 로직 추가
+        raise
+
+# 이 함수는 정기적인 스케줄러(예: cron, Airflow)에 의해 호출되거나
+# Vo api svr의 보고서 생성 트리거 API에 의해 호출될 수 있습니다.
+# 예: 스케줄러 설정에서 python /path/to/swap_reporting_mvp/tain_bat/scheduler.py 실행
+# 예: Vo api svr에서 tain_bat.scheduler.run_daily_batch(report_date) 호출
