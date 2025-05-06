@@ -1,0 +1,174 @@
+# tests/test_data_process.py
+
+import pytest
+import datetime
+# 필요한 모듈 임포트
+# from tain_tube.validation import cftc_validate_record, ValidationError # 유효성 검증
+# from tain_bat.transform import apply_cftc_transformations # 데이터 변환
+# from tain_bat.aggregator import aggregate_trades # 데이터 집계
+# from tain_on.report_generator import generate_cftc_report_document # 보고서 생성
+# from your_currency_converter import convert_currency # 통화 변환 함수 임포트 가정 (PDF 스니펫 관련)
+
+# TODO: 실제 임포트 경로 사용 및 실제 예외 클래스 사용
+class CftcValidationError(Exception): pass
+class DataProcessingError(Exception): pass
+
+
+class TestCftcDataProcess:
+    """
+    CFTC 스왑 데이터 보고 가이드라인에 따른 데이터 처리 관련 테스트.
+    유효성 검증, 변환, 집계, 보고서 생성 정확성 등을 검증합니다.
+    (아키텍처 다이어그램의 'TainTube', 'TainBat', 'TainOn', 파일/DB 관련)
+    """
+    @pytest.fixture # fixture를 사용하여 테스트 데이터 준비
+    def valid_swap_records_raw(self):
+        """TainTube 입력에서 파싱될 유효한 원본 스왑 레코드 데이터."""
+        return [
+            {"UNIQUE_ID": "ID1", "REPORTING_PARTY": "LEIA", "TRADE_DATE": datetime.date(2023, 1, 1), "PRICE": 100.50, "CURRENCY": "USD", "VOLUME": 10, "VARIATION_MARGIN_COLLECTED": 5.0, "VARIATION_MARGIN_CURRENCY": "USD"},
+            {"UNIQUE_ID": "ID2", "REPORTING_PARTY": "LEIB", "TRADE_DATE": datetime.date(2023, 1, 1), "PRICE": 200.75, "CURRENCY": "USD", "VOLUME": 20, "VARIATION_MARGIN_COLLECTED": 10.0, "VARIATION_MARGIN_CURRENCY": "USD"},
+            {"UNIQUE_ID": "ID3", "REPORTING_PARTY": "LEIA", "TRADE_DATE": datetime.date(2023, 1, 2), "PRICE": 150.00, "CURRENCY": "EUR", "VOLUME": 15, "VARIATION_MARGIN_COLLECTED": 7.0, "VARIATION_MARGIN_CURRENCY": "EUR"}, # 다른 날짜, 통화, 마진
+            {"UNIQUE_ID": "ID4", "REPORTING_PARTY": "LEIA", "TRADE_DATE": datetime.date(2023, 1, 1), "PRICE": 50.00, "CURRENCY": "USD", "VOLUME": 5, "VARIATION_MARGIN_COLLECTED": 2.0, "VARIATION_MARGIN_CURRENCY": "USD", "PORTFOLIO_ID": "PORT1"}, # 포트폴리오 마진 예시
+             {"UNIQUE_ID": "ID5", "REPORTING_PARTY": "LEIA", "TRADE_DATE": datetime.date(2023, 1, 1), "PRICE": 60.00, "CURRENCY": "USD", "VOLUME": 6, "VARIATION_MARGIN_COLLECTED": 3.0, "VARIATION_MARGIN_CURRENCY": "USD", "PORTFOLIO_ID": "PORT1"}, # 같은 포트폴리오 다른 거래
+
+            # TODO: CFTC 가이드라인의 다양한 유효 데이터 케이스 추가
+        ]
+
+    @pytest.fixture
+    def invalid_swap_records_raw(self):
+        """CFTC 가이드라인을 위반하는 유효하지 않은 원본 스왑 레코드 데이터."""
+        return [
+            {"UNIQUE_ID": "ID6", "REPORTING_PARTY": "", "TRADE_DATE": datetime.date(2023, 1, 1), ...}, # 필수 필드 누락
+            {"UNIQUE_ID": "ID7", "TRADE_DATE": "invalid-date", ...}, # 날짜 형식 오류
+            {"UNIQUE_ID": "ID8", "VARIATION_MARGIN_COLLECTED": 10.0, "VARIATION_MARGIN_CURRENCY": "", ...}, # 마진 통화 누락 (PDF 스니펫 관련)
+            {"UNIQUE_ID": "ID9", "VARIATION_MARGIN_COLLECTED": -5.0, "VARIATION_MARGIN_CURRENCY": "USD", ...}, # 마진 값 범위 오류 가정
+            # TODO: CFTC 가이드라인의 모든 유효성 검증 규칙 위반 케이스 추가
+        ]
+
+    # CFTC 데이터 유효성 검증 테스트 (가이드라인 반영)
+    def test_cftc_record_validation_valid(self, valid_swap_records_raw):
+        """유효한 스왑 데이터 레코드가 CFTC 가이드라인을 통과하는지 테스트."""
+        # from tain_tube.validation import cftc_validate_record
+        for record in valid_swap_records_raw:
+            # assert cftc_validate_record(record) is True # 실제 유효성 검증 함수 호출
+
+            pass # TODO: CFTC 가이드라인의 다양한 유효 데이터 케이스에 대한 테스트 작성
+
+
+    def test_cftc_record_validation_invalid(self, invalid_swap_records_raw):
+        """유효하지 않은 스왑 데이터 레코드에 대해 올바른 오류가 발생하는지 테스트."""
+        # from tain_tube.validation import cftc_validate_record, ValidationError
+        for record in invalid_swap_records_raw:
+            with pytest.raises(CftcValidationError): # 또는 해당 검증 오류 예외
+                # cftc_validate_record(record) # 실제 유효성 검증 함수 호출
+                pass # TODO: CFTC 가이드라인의 모든 유효성 검증 규칙 (필수 필드, 데이터 타입, 형식, 값 범위, 조건부 필드 등) 위반 케이스에 대한 테스트 작성
+
+
+    # CFTC 가이드라인에 따른 데이터 변환 정확성 테스트
+    # PDF 스니펫의 통화 변환 관련 내용을 반영합니다.
+    # @patch('your_currency_converter.convert_currency') # 외부 통화 변환 서비스 모의
+    def test_apply_cftc_transformations_accuracy(self, valid_swap_records_raw):
+        """CFTC 가이드라인에 따른 데이터 변환 로직 정확성 테스트."""
+        # from tain_bat.transform import apply_cftc_transformations
+        # mock_convert_currency.side_effect = lambda value, from_ccy, to_ccy: value * 1.2 # USD -> EUR 변환 가상 로직
+
+        # 첫 번째 유효 레코드에 대한 변환 테스트 예시
+        raw_data_usd = valid_swap_records_raw[0] # USD 가격/마진 가정
+        # transformed_data_usd = apply_cftc_transformations(raw_data_usd) # 실제 변환 함수 호출
+        # assert transformed_data_usd.get('STANDARDIZED_PRICE_USD') == 100.50 # USD는 변환 없을 수도
+        # assert transformed_data_usd.get('STANDARDIZED_MARGIN_USD') == 5.0
+
+        raw_data_eur = valid_swap_records_raw[2] # EUR 가격/마진 가정
+        # transformed_data_eur = apply_cftc_transformations(raw_data_eur) # 실제 변환 함수 호출
+        # assert transformed_data_eur.get('STANDARDIZED_PRICE_USD') == 150.00 * 1.2 # EUR -> USD 변환 가정
+        # assert transformed_data_eur.get('STANDARDIZED_MARGIN_USD') == 7.0 * 1.2
+
+        pass # TODO: 다양한 변환 규칙 (통화 변환, 단위 표준화, 파생 값 계산 등) 에 대한 테스트 구현
+
+
+    # CFTC 가이드라인에 따른 데이터 집계 정확성 테스트
+    # PDF 스니펫의 포트폴리오/거래 단위 마진 집계 관련 내용을 반영합니다.
+    def test_aggregate_trades_according_to_cftc_rules(self, valid_swap_records_raw):
+        """CFTC 가이드라인에 따른 거래 집계 정확성 테스트."""
+        # from tain_bat.aggregator import aggregate_trades
+        #
+        # # CFTC 가이드라인에 정의된 집계 기준 (예: 보고 주체, 날짜, 포트폴리오별 총 변동 마진)
+        # criteria_party_date_portfolio = ['REPORTING_PARTY', 'TRADE_DATE', 'PORTFOLIO_ID']
+        # expected_aggregation = {
+        #     ('LEIA', datetime.date(2023, 1, 1), None): {'count': 1, 'total_volume': 10, 'total_margin_usd': 5.0}, # 포트폴리오 없는 거래 ID1
+        #     ('LEIB', datetime.date(2023, 1, 1), None): {'count': 1, 'total_volume': 20, 'total_margin_usd': 10.0}, # 포트폴리오 없는 거래 ID2
+        #     ('LEIA', datetime.date(2023, 1, 2), None): {'count': 1, 'total_volume': 15, 'total_margin_usd': 7.0 * 1.2}, # EUR -> USD 변환된 마진 ID3
+        #     ('LEIA', datetime.date(2023, 1, 1), 'PORT1'): {'count': 2, 'total_volume': 11, 'total_margin_usd': 5.0}, # 같은 포트폴리오 거래 ID4(2.0) + ID5(3.0) = 5.0 (PDF 스니펫의 포트폴리오 레벨 합산 가정)
+        # } # 가이드라인에 따른 예상 집계 결과 정의 (마진은 USD로 표준화되었다고 가정)
+        #
+        # # actual_aggregation = aggregate_trades(self.valid_swap_records_raw, group_by=criteria_party_date_portfolio) # 실제 집계 함수 호출
+        # # self.assertEqual(actual_aggregation, expected_aggregation)
+
+        pass # TODO: CFTC 가이드라인의 모든 집계 기준 (날짜별, 주체별, 상품별, 포트폴리오별 등) 및 계산 (합계, 평균, 건수 등) 정확성 테스트 구현
+
+
+    # CFTC 보고서 생성 테스트
+    # @patch('tain_on.report_generator.get_data_for_cftc_report') # 보고서 데이터 조회 함수 모의
+    # @patch('tain_on.report_generator.format_cftc_report_row') # 각 보고서 행 포맷팅 함수 모의
+    def test_generate_cftc_report_accuracy(self, mocker):
+        """CFTC 보고서 생성 함수가 정확한 데이터와 형식으로 보고서를 생성하는지 테스트."""
+        # from tain_on.report_generator import generate_cftc_report_document
+        #
+        # # 보고서 생성에 사용할 처리된/집계된 데이터 모의
+        # processed_aggregated_data = [
+        #     {"AggregatedParty": "LEIA", "ReportDate": datetime.date(2023, 1, 1), "TotalMarginUSD": 5.0, "TotalVolume": 10, "GroupCriteria": ("LEIA", datetime.date(2023, 1, 1), None)},
+        #     {"AggregatedParty": "LEIB", "ReportDate": datetime.date(2023, 1, 1), "TotalMarginUSD": 10.0, "TotalVolume": 20, "GroupCriteria": ("LEIB", datetime.date(2023, 1, 1), None)},
+        #      {"AggregatedParty": "LEIA", "ReportDate": datetime.date(2023, 1, 1), "TotalMarginUSD": 5.0, "TotalVolume": 11, "GroupCriteria": ("LEIA", datetime.date(2023, 1, 1), 'PORT1')}, # 포트폴리오 집계 행
+        #     # TODO: CFTC 가이드라인에 따른 보고서 데이터 행 예시 추가
+        # ]
+        #
+        # mock_get_data.return_value = processed_aggregated_data
+        # mock_format_row = mocker.patch('tain_on.report_generator.format_cftc_report_row', side_effect=lambda row: f"FORMATTED_{row['GroupCriteria']}|{row['TotalMarginUSD']}") # 행 포맷팅 모의
+        #
+        # report_date = datetime.date(2023, 1, 1)
+        # # generated_report_content = generate_cftc_report_document(report_date) # 실제 보고서 생성 함수 호출
+        #
+        # # 생성된 보고서 내용 검증 (CFTC 요구 포맷 및 내용)
+        # # 예: 생성된 파일 내용 읽기, JSON 구조 검증, 특정 필드의 값이 올바른지 확인
+        # # assert "CFTC DAILY SWAP REPORT" in generated_report_content # 제목 포함 확인
+        # # assert "FORMATTED_('LEIA', datetime.date(2023, 1, 1), None)|5.0" in generated_report_content # 특정 포맷팅된 행 내용 확인
+
+        pass # TODO: 실제 보고서 생성 로직 테스트 구현 (CFTC 요구 포맷, 필수 필드 포함 여부, 계산 값 정확성 등)
+
+
+    # 예시: 데이터 파이프라인 전체 정확성 테스트 (TainTube -> DB -> TainBat -> DB/파일 -> Report)
+    @pytest.mark.django_db # 실제 DB 사용 시 필요
+    @patch('tain_tube.processor.process_incoming_data_file') # TainTube 파일 처리 모의
+    @patch('tain_bat.runner.run_daily_batch_processing') # TainBat 배치 실행 모의
+    @patch('tain_on.report_generator.generate_cftc_report_document') # 보고서 생성 모의
+    def test_full_data_pipeline_accuracy(self, mock_report_gen, mock_batch_runner, mock_tube_processor, mocker):
+        """입력 파일부터 최종 보고서 생성까지 데이터 파이프라인 전체 정확성 테스트."""
+        # from main_workflow_runner import run_daily_reporting_process # 전체 워크플로우 실행 함수 가정
+
+        # 1. TainTube 처리 함수가 정상 호출되도록 설정
+        mock_tube_processor.return_value = {"processed_count": 100, "error_count": 5}
+
+        # 2. TainBat 배치 실행 함수가 정상 호출되도록 설정
+        mock_batch_runner.return_value = {"status": "completed"}
+
+        # 3. 보고서 생성 함수가 예상 데이터를 기반으로 호출되고 최종 보고서 내용을 반환하도록 설정
+        expected_report_content = "Final CFTC Report Content"
+        mock_report_gen.return_value = expected_report_content
+
+        process_date = datetime.date(2023, 1, 1)
+        input_file_path = "/fake/input/data.txt"
+
+        # 전체 워크플로우 실행
+        # final_report = run_daily_reporting_process(input_file_path, process_date)
+
+        # 각 단계의 함수가 올바른 인자로 호출되었는지 확인
+        # mock_tube_processor.assert_called_once_with(input_file_path)
+        # mock_batch_runner.assert_called_once_with(process_date)
+        # mock_report_gen.assert_called_once_with(process_date) # 또는 특정 데이터 인자
+
+        # 최종 결과 검증
+        # assert final_report == expected_report_content
+
+        # TODO: 실제 데이터 흐름에 따라 각 단계 함수를 호출하고 중간/최종 결과를 검증하는 코드를 작성
+        # TODO: 실제 DB/파일 시스템을 사용하거나 정교하게 모의하여 데이터 무결성 검증
+
+        pass # TODO: 아키텍처 다이어그램의 핵심 데이터 흐름에 대한 통합 정확성 테스트 구현
