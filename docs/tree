@@ -1,0 +1,51 @@
+swap-reporting-mvp/
+├── docs/                 # 프로젝트 문서 (P1-P3: 지속적으로 업데이트)
+│   ├── architecture.md   # 시스템 아키텍처 설명
+│   ├── requirements.md   # 기능 및 비기능 요구사항 상세화
+│   └── api-spec/         # API 명세서 (P1-P2: 모듈 개발과 병행)
+├── src/                  # 소스 코드가 위치하는 메인 디렉토리
+│   ├── common/             # 공통 코드 및 라이브러리 (P1: 초기 구현, P2-P3: 필요에 따라 확장)
+│   │   ├── __init__.py
+│   │   └── utils.py        # 유틸리티 함수 등
+│   ├── data-ingestion/     # 데이터 수집 모듈 (P1: 핵심 기능)
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   ├── api/            # API 엔드포인트 구현 (VOapi_svr 해당 부분)
+│   │   └── adapters/       # 다양한 데이터 소스 연동 어댑터 (MVP: 핵심 소스부터)
+│   ├── data-processing/    # 데이터 처리 및 정규화 모듈 (P1: 핵심 기능)
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   └── transformers/   # 데이터 변환 및 매핑 로직
+│   ├── validation/         # 유효성 검사 및 검증 모듈 (P1: 핵심 규칙)
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   └── rules/          # MVP 핵심 유효성 검사 규칙 정의
+│   ├── error-monitoring/   # 오류 관리 및 모니터링 모듈 (P2: 기본적인 로깅 및 알림, P3: 관리 UI 연동 및 고도화)
+│   │   ├── __init__.py
+│   │   └── main.py
+│   ├── report-generation/  # 보고서 생성 모듈 (P2: MVP 보고서 형식)
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   └── templates/      # MVP 보고서 형식 템플릿
+│   ├── report-submission/  # 보고서 제출 모듈 (P2: SDR 연동 프로토콜 구현)
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   └── adapters/       # SDR 연동 어댑터 (MVP: 대상 SDR 연동)
+│   └── web/                # 웹 인터페이스 모듈 (P3: 필수 관리 기능)
+│       ├── __init__.py
+│       ├── main.py
+│       └── templates/      # MVP 관리 UI 템플릿
+├── tests/                # 테스트 코드 (P1-P3: 각 모듈 개발과 병행)
+│   ├── unit/               # 단위 테스트
+│   ├── integration/        # 통합 테스트 (P1 완료 후 시작)
+│   ├── performance/        # 성능 테스트 스크립트 (P2 완료 후 시작)
+│   └── data/               # 테스트 데이터 파일
+├── config/               # 설정 파일 (P1: 초기 설정, P2-P3: 환경별 설정 추가)
+│   ├── settings.yaml       # 환경 설정
+│   └── validation_rules.json # 유효성 검사 규칙 정의 파일
+├── deployment/           # 배포 관련 파일 (P2: 단일 클러스터 배포, P3: 멀티 클라우드 확장)
+│   ├── Dockerfile          # 각 모듈별 Dockerfile
+│   └── kubernetes/         # Kubernetes 배포 Manifests
+├── .gitignore            # Git 추적 제외 파일 목록
+└── README.md             # 프로젝트 설명 파일 (P1: 기본 작성, P2-P3: 상세화)
+└── requirements.txt      # Python 종속성 목록 (또는 각 언어/모듈별 종속성 파일)
