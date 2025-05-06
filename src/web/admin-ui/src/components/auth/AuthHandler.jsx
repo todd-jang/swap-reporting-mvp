@@ -113,17 +113,82 @@ function AuthHandler() {
     }
   };
 
+async function callProtectedApi() {
+  const accessToken = sessionStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
+
+  if (!accessToken) {
+    console.log('Access Token not found. User not logged in.');
+    // 로그인 페이지로 리디렉션 또는 에러 처리
+    return;
+  }
+
+  try {
+    const response = await fetch('YOUR_PROTECTED_API_ENDPOINT', {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+        if (response.status === 401) {
+            console.log('Access Token expired or invalid. Need to refresh or re-authenticate.');
+            // TODO: Refresh Token을 사용하여 Access Token 갱신 로직 호출
+        }
+        throw new Error(`API request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+    console.log('API Response:', data);
+    // API 응답 처리
+  } catch (error) {
+    console.error('Error calling protected API:', error);
+    // 에러 처리 (예: 사용자에게 메시지 표시)
+  }
+}
+
+// 예: 컴포넌트 마운트 시 API 호출
+// useEffect(() => {
+//   callProtectedApi();
+// }, []);  
+  
+const [isLoading, setIsLoading] = useState(true); // 로딩 상태 관리
+const [error, setError] = useState(null); // 에러 상태 관리
+
+  // ... (effect 및 exchangeCodeForTokens 함수 내에서 상태 업데이트)
 
   return (
     <div>
-      {/* 로딩 스피너 등을 여기에 표시할 수 있습니다. */}
-      {location.pathname === new URL(OAUTH_CONFIG.redirectUri).pathname ? (
-        <p>로그인 처리 중...</p>
-      ) : (
-        <p>로그인 대기 중...</p> // 로그인 버튼 등을 표시할 컴포넌트
+      {isLoading && <p>로그인 처리 중...</p>} {/* 로딩 상태 표시 */}
+      {error && (
+        <div style={{ color: 'red' }}>
+          <p>{error}</p> {/* 에러 메시지 표시 */}
+          {/* 사용자가 다시 시도할 수 있도록 로그인 버튼 등을 표시할 수 있습니다. */}
+          {/* 에러 발생 시 로그인 버튼을 다시 표시하려면, error 상태일 때 LoginButton 컴포넌트를 렌더링하도록 설정합니다. */}
+          <button onClick={() => navigate('/')}>홈으로 돌아가기</button>
+          {/* 또는 <LoginButton /> 컴포넌트 렌더링 */}
+        </div>
       )}
+      {/* 로딩 중도 아니고 에러도 아닐 때, 콜백 경로가 아닌 경우에 대한 처리 */}
+      {!isLoading && !error && location.pathname !== new URL(OAUTH_CONFIG.redirectUri).pathname && (
+          // 이 컴포넌트가 다른 경로에서도 사용된다면, 여기에 로그인 필요 메시지나 로그인 버튼을 표시할 수 있습니다.
+          // 또는 단순히 아무것도 렌더링하지 않고 다른 라우트에서 로그인 상태를 확인하도록 합니다.
+          <p>로그인 상태 확인 중...</p>
+      )}
+      {/* 콜백 경로에서 처리 완료 후에는 이 컴포넌트가 자동으로 사라지거나, 다음 페이지로 리디렉션되므로 추가적인 UI 요소는 필요 없을 수 있습니다. */}
     </div>
   );
+  
+  //return (
+  //  <div>
+  //    {/* 로딩 스피너 등을 여기에 표시할 수 있습니다. */}
+  //    {location.pathname === new URL(OAUTH_CONFIG.redirectUri).pathname ? (
+  //     <p>로그인 처리 중...</p>
+  //    ) : (
+  //      <p>로그인 대기 중...</p> // 로그인 버튼 등을 표시할 컴포넌트
+  //    )}
+  //  </div>
+ // );
 }
 
 export default AuthHandler;
