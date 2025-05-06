@@ -1,0 +1,44 @@
++---------------------+       +-----------------------+       +---------------------+
+|    External Admin   |       |    External Data      |       |       SDR           |
+|    / User (Web UI)  |       |     Sources           |       |  (Swap Data Repo)   |
++---------------------+       +-----------------------+       +---------------------+
+           |                           |                               |
+           |     (Secure HTTPS)        | (SFTP/API/etc.)               | (SDR API)
+           |                           |                               |
++--------------------------------------------------------------------------------+
+|                             API Gateway (Central Access Point)                 |
+|  (Handles Authentication, Authorization, Routing, Load Balancing for external/cross-cluster calls) |
++--------------------------------------------------------------------------------+
+           |               |               |               |
+           |               |               |               | (API Calls)
+           |               |               |               |
++------------------+------------------+------------------+------------------+
+|                  |                  |                  |                  |
+|    +---------------------+    +---------------------+    +---------------------+
+|    |     Cloud A         |    |     Cloud B         |    |    On-Premises      |
+|    | (e.g., AWS Region)  |    | (e.g., Azure Region)|    |    (Data Center)    |
+|    +---------------------+    +---------------------+    +---------------------+
+|           |                            |                            |
+|    +-----------------+          +-----------------+          +-----------------+
+|    |  Cluster A      |          |  Cluster B      |          |  Cluster C      |
+|    | (Kubernetes)    |          | (Kubernetes)    |          | (Kubernetes/VMs)|
+|    +-----------------+          +-----------------+          +-----------------+
+|           | \ / |                      | \ / |                      | \ / |
+|           |  +--+----------------------+  +--+----------------------+  +--+
+|           |  | Intra-Cluster & Inter-Cluster Communication (via API Gateway or Direct/VPN) |
+|           v  v |                      v  v |                      v  v |
+|    +---------------------+    +---------------------+    +---------------------+
+|    | [P1] Data Ingestion |    | [P1] Data Processing|    | [P1] Data Ingestion | <- From On-Prem Sources
+|    | [P1] Validation     |    | [P1] Validation     |    | [P2] Report Submission -> SDR Direct (if applicable)
+|    | [P2] Report Gen.    |    | [P2] Report Gen.    |    | [P2] Error Monitoring Core
+|    | [P2] Report Sub.    |    | [P2] Report Sub.    |    | [P3] Web UI (Optional location)
+|    | [P2] Error Mon.     |    | [P2] Error Mon.     |    |
+|    | [P3] Web UI (Opt)   |    | [P3] Web UI (Opt)   |    |
+|    +---------------------+    +---------------------+    +---------------------+
+|       (Pods running Modules)     (Pods running Modules)     (Pods running Modules)
+|                                                                              |
+|                                                                              | (VPN/Direct Connection)
+|                                                                              |
+|    +---------------------+
+|    | On-Prem Data Sources|
+|    +---------------------+
