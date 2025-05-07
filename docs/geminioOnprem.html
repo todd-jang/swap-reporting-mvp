@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>On-Premise 일괄전송시스템 배치 예상도</title>
+<style>
+    body {
+        font-family: sans-serif;
+        margin: 20px;
+        background-color: #f4f4f4;
+    }
+    .server-room-section {
+        border: 2px dashed #333;
+        padding: 30px;
+        position: relative;
+        width: 800px;
+        margin: 0 auto;
+        background-color: #fff;
+        box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    .rack {
+        border: 2px solid #555;
+        width: 120px;
+        height: 350px; /* 랙 높이 */
+        position: absolute;
+        background-color: #666;
+        color: white;
+        text-align: center;
+        padding-top: 10px;
+        font-size: 14px;
+        box-shadow: 3px 3px 5px rgba(0,0,0,0.3);
+    }
+    .rack-label {
+        font-weight: bold;
+        margin-bottom: 5px;
+    }
+    .device {
+        border: 1px solid #bbb;
+        background-color: #eee;
+        color: #333;
+        margin: 2px auto;
+        width: 100px;
+        height: 20px; /* 장비 높이 (1U 기준) */
+        font-size: 10px;
+        line-height: 20px;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
+     .device-label {
+         padding: 0 5px;
+     }
+
+    .cold-aisle {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 150px; /* 통로 너비 */
+        background-color: rgba(173, 216, 230, 0.3); /* 연한 파랑 */
+        text-align: center;
+        padding-top: 20px;
+        font-weight: bold;
+        font-size: 12px;
+    }
+     .hot-aisle {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        right: 0;
+        width: 150px; /* 통로 너비 */
+        background-color: rgba(255, 99, 71, 0.3); /* 연한 주황 */
+        text-align: center;
+        padding-top: 20px;
+        font-weight: bold;
+        font-size: 12px;
+     }
+
+     .cable {
+         position: absolute;
+         border: 1px dashed blue; /* 네트워크 케이블 */
+         z-index: -1; /* 뒤로 보내기 */
+     }
+     .power-cable {
+          position: absolute;
+          border: 1px dashed red; /* 전원 케이블 */
+          z-index: -1;
+     }
+
+     .label {
+         position: absolute;
+         font-weight: bold;
+         font-size: 12px;
+     }
+
+</style>
+</head>
+<body>
+
+<h1>On-Premise 전산실 - 일괄전송시스템 배치 예상도 (개념적)</h1>
+<p>이 평면도는 On-Premise 전산실 내 일괄전송시스템 관련 장비 배치를 개념적으로 보여줍니다.</p>
+
+<div class="server-room-section">
+    <div class="cold-aisle" style="left: 0;">Cold Aisle</div>
+    <div class="hot-aisle" style="right: 0;">Hot Aisle</div>
+
+    <div class="rack" style="top: 50px; left: 180px;">
+        <div class="rack-label">랙 A</div>
+        <div class="device"><div class="device-label">일괄전송시스템 Server 1</div></div>
+        <div class="device"><div class="device-label">일괄전송시스템 Server 2</div></div>
+        <div class="device" style="height: 40px;"><div class="device-label">스토리지 (데이터 랜딩/처리)</div></div> <div class="device"><div class="device-label">네트워크 스위치 (Local)</div></div>
+         <div class="device"><div class="device-label">VPN Gateway (NCP 연동)</div></div>
+         <div class="device" style="background-color: #ccc;"><div class="device-label">여유 공간</div></div>
+         <div class="device" style="background-color: #ccc;"><div class="device-label">여유 공간</div></div>
+         </div>
+
+     <div class="rack" style="top: 50px; left: 330px;">
+        <div class="rack-label">랙 B</div>
+        <div class="device"><div class="device-label">Vb fep Server</div></div>
+        <div class="device"><div class="device-label">Vo fep Server</div></div>
+        <div class="device"><div class="device-label">네트워크 스위치 (외부)</div></div>
+        <div class="device" style="background-color: #ccc;"><div class="device-label">여유 공간</div></div>
+        </div>
+
+     <div class="rack" style="top: 50px; left: 480px;">
+        <div class="rack-label">랙 C</div>
+         <div class="device"><div class="device-label">백업 서버</div></div>
+         <div class="device"><div class="device-label">유지보수 콘솔</div></div>
+        <div class="device" style="background-color: #ccc; height: 100px;"><div class="device-label">향후 증설 공간</div></div>
+        </div>
+
+    <div class="label" style="top: 420px; left: 180px; width: 120px; text-align: center;">/data/.../rec (스토리지 영역)</div>
+
+    <div class="label" style="top: 20px; right: 10px; font-size: 16px;">--> NCP Cloud</div>
+
+
+    <div class="cable" style="top: 100px; left: 300px; width: 30px; height: 0px;"></div>
+     <div class="cable" style="top: 130px; left: 300px; width: 30px; height: 0px;"></div>
+    <div class="cable" style="top: 160px; left: 300px; width: 30px; height: 0px;"></div>
+
+    <div class="cable" style="top: 200px; left: 300px; width: 30px; height: 0px;"></div>
+
+     <div class="cable" style="top: 100px; left: 450px; width: 30px; height: 0px;"></div>
+     <div class="cable" style="top: 130px; left: 450px; width: 30px; height: 0px;"></div>
+     <div class="cable" style="top: 160px; left: 450px; width: 30px; height: 0px;"></div>
+
+
+    <div class="cable" style="top: 230px; left: 300px; height: 50px; width: 0px; border-right: 1px dashed blue;"></div>
+     <div class="label" style="top: 285px; left: 260px; font-size: 10px;">VPN/전용회선 연결</div>
+
+
+    <div class="power-cable" style="top: 380px; left: 200px; width: 50px; height: 0px;"></div>
+    <div class="power-cable" style="top: 380px; left: 350px; width: 50px; height: 0px;"></div>
+    <div class="power-cable" style="top: 380px; left: 500px; width: 50px; height: 0px;"></div>
+
+
+</div>
+
+</body>
+</html>
