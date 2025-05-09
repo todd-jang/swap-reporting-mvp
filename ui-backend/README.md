@@ -48,3 +48,15 @@ scheduler.py는 정해진 스케줄에 따라 tainon_processor.py를 직접 호�
 ui_backend/api.py 파일의 맨 아래 if __name__ == "__main__": 블록의 주석을 해제합니다.
 프로젝트 루트 디렉터리(swap_reporting_mvp) 또는 ui_backend 디렉터리에서 PYTHONPATH를 설정하거나, uvicorn ui_backend.api:app --reload 명령을 실행합니다 (import 오류 해결 필요).
 브라우저에서 http://127.0.0.1:8000/docs 또는 http://localhost:8000/docs 에 접속하여 FastAPI Swagger UI를 통해 API를 테스트할 수 있습니다.
+
+--------------------
+
+테스트 실행:
+
+pytest 명령어를 사용하여 실행합니다. tests/unit 디렉터리에서 실행하거나 프로젝트 루트에서 실행할 수 있습니다.
+
+```Bash
+
+pytest tests/unit/
+# 또는 프로젝트 루트에서
+# pytest tests/unit/test_utils.py
