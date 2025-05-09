@@ -1,0 +1,107 @@
+# tain_tube/file_listener.py
+
+import time
+import os
+import glob # 파일 패턴 매칭을 위해
+# from tain_tube.file_parser import parse_swap_file # 파일 파싱 함수 호출
+# from tain_tube.data_ingestor import ingest_parsed_data # 데이터 적재 함수 호출
+# from common.utils import generate_unique_id # 공통 유틸리티 사용
+
+# --- 개념적인 함수 (실제 로직 대신 시뮬레이션) ---
+def parse_swap_file(file_path: str) -> list:
+    """주어진 스왑 파일 경로에서 데이터를 파싱하여 레코드 목록 반환."""
+    print(f"[FileListener] 파싱 시작: {file_path}")
+    # TODO: 실제 파일 읽기, 포맷 분석, 데이터 파싱 로직 구현
+    # 예: CSV 파일 읽기, XML 파싱 등
+    parsed_records = []
+    num_records = random.randint(10, 100) # 파일당 레코드 수 시뮬레이션
+    for i in range(num_records):
+         # common.data_models.SwapRecord 형태의 딕셔너리 데이터 시뮬레이션
+         parsed_records.append({
+             "unique_transaction_identifier": f"UTI_SIM_{generate_unique_id()}",
+             "reporting_counterparty_lei": "LEI_OUR_SIM",
+             "other_counterparty_lei": f"LEI_CPTY_SIM_{i}",
+             "asset_class": random.choice(["IR", "FX"]),
+             "swap_type": random.choice(["IRS", "CCS"]),
+             "action_type": "NEWT",
+             "execution_timestamp": datetime.datetime.utcnow().isoformat(),
+             "effective_date": datetime.date.today().isoformat(),
+             "expiration_date": (datetime.date.today() + datetime.timedelta(days=random.randint(365, 3650))).isoformat(),
+             "notional_currency_1": random.choice(["USD", "KRW"]),
+             "notional_value_1": random.uniform(1e5, 1e7),
+         })
+    print(f"[FileListener] 파싱 완료: {file_path} ({num_records} 레코드)")
+    return parsed_records
+
+def ingest_parsed_data(records: list, source_file: str):
+    """파싱된 레코드 목록을 데이터 저장소(DB/Queue)에 적재."""
+    print(f"[FileListener] 데이터 적재 시작 ({len(records)} 레코드, 소스: {source_file})")
+    # TODO: 실제 데이터베이스 INSERT, 메시지 큐 발행 등 적재 로직 구현
+    # 예: bulk_insert_to_db(records)
+    # 예: publish_to_message_queue('raw_swap_data_topic', records)
+    print(f"[FileListener] 데이터 적재 완료.")
+
+
+def generate_unique_id(): # common.utils 에서 임포트한다고 가정
+     return random.randint(10000, 99999)
+
+
+# --- 파일 감시 및 처리 로직 ---
+def listen_for_files(watch_directory: str, processed_directory: str, interval_seconds: int = 10):
+    """
+    지정된 디렉터리를 감시하고 새 파일 발견 시 처리 워크플로우를 시작합니다.
+    """
+    print(f"파일 감시 시작: {watch_directory}, 감시 주기: {interval_seconds}초")
+    # TODO: 무한 루프로 감시 실행 (실제 서비스에서는 더 견고한 방식으로)
+    # while True:
+    #     try:
+    #         # 특정 패턴의 파일 검색 (예: *.csv, *.xml)
+    #         new_files = glob.glob(os.path.join(watch_directory, '*.csv')) + glob.glob(os.path.join(watch_directory, '*.xml'))
+    #
+    #         for file_path in new_files:
+    #             print(f"새 파일 감지: {file_path}")
+    #             # 파일 처리 워크플로우 시작 (별도의 스레드나 비동기 작업으로 처리하여 논블록킹 유지)
+    #             try:
+    #                 # 1. 파일 파싱
+    #                 parsed_records = parse_swap_file(file_path)
+    #
+    #                 # 2. 데이터 적재
+    #                 if parsed_records:
+    #                     ingest_parsed_data(parsed_records, file_path)
+    #
+    #                 # 3. 처리 완료 후 파일 이동 (중복 처리 방지)
+    #                 file_name = os.path.basename(file_path)
+    #                 target_path = os.path.join(processed_directory, file_name + "." + datetime.datetime.now().strftime("%Y%m%d%H%M%S"))
+    #                 os.rename(file_path, target_path)
+    #                 print(f"파일 처리 완료 및 이동: {file_path} -> {target_path}")
+    #
+    #             except Exception as e:
+    #                 print(f"파일 처리 중 오류 발생: {file_path}, 오류: {e}")
+    #                 # TODO: 오류 파일 격리, 알림 발송 등 오류 처리 로직
+    #
+    #     except Exception as e:
+    #         print(f"파일 감시 루프 중 오류 발생: {e}")
+    #         # TODO: 시스템 수준 오류 처리
+    #
+    #     time.sleep(interval_seconds) # 지정된 주기만큼 대기
+
+    # 시뮬레이션을 위한 단일 파일 처리 예시
+    simulated_file = "simulated_swap_data_batch_001.csv"
+    print(f"새 파일 감지 (시뮬레이션): {simulated_file}")
+    parsed_records = parse_swap_file(simulated_file)
+    if parsed_records:
+        ingest_parsed_data(parsed_records, simulated_file)
+    print("파일 감시 및 처리 시뮬레이션 완료.")
+
+
+# --- 실행 예시 ---
+if __name__ == "__main__":
+    # TODO: 설정 파일 등에서 감시 및 완료 디렉터리 경로 로드
+    WATCH_DIR = "./watch" # 감시할 디렉터리
+    PROCESSED_DIR = "./processed" # 처리 완료 후 이동할 디렉터리
+    os.makedirs(WATCH_DIR, exist_ok=True)
+    os.makedirs(PROCESSED_DIR, exist_ok=True)
+
+    # listen_for_files(WATCH_DIR, PROCESSED_DIR, interval_seconds=5)
+    print("file_listener.py 파일은 파일 감시 및 처리 시작 로직을 정의합니다.")
+    print("실제 실행 시 지정된 디렉터리를 감시합니다.")
