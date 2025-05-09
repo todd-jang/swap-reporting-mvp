@@ -285,3 +285,93 @@ swap_reporting_mvp/
 ├── README.md               # 프로젝트 개요 및 설정 방법
 ├── requirements.txt        # 개발 환경 설정 또는 전체 프로젝트 공통 의존성
 └── .gitignore              # Git 버전 관리에서 제외할 파일/디렉터리 지정
+
+
+Swap Reporting MVP 전체 시스템 아키텍처 (개념적 설명)
+
+이 시스템은 스왑 거래 데이터를 수집하고, CFTC/KTFC 규정에 맞게 처리 및 검증하며, AI 기반 이상 탐지 기능을 수행하고, 최종적으로 규제 당국에 보고하며, 사용자에게 관리 기능을 제공하는 분산 시스템입니다.
+
+1. 데이터 소스 (Data Sources):
+
+거래 시스템 (Trading Platform): 스왑 거래가 실제로 체결되는 시스템. 거래 발생 시 실시간 데이터 또는 배치 파일을 생성합니다.
+담보 관리 시스템 (Collateral Management System): 변동 증거금, 개시 증거금 등 담보 정보를 관리하는 시스템. 담보 변동 발생 시 관련 데이터를 제공합니다.
+기타 내부/외부 시스템: 계약 정보 시스템, 고객 정보 시스템, 시장 데이터 피드 등 보고서 생성을 위해 필요한 추가 정보를 제공하는 시스템.
+2. 데이터 인제션 레이어 (Data Ingestion Layer):
+
+TainTube (파일 기반 인제션):
+역할: 거래 시스템 등에서 생성된 배치 파일(CSV, XML 등)을 수신하고 파싱하여 원본 데이터를 추출합니다.
+입력: 배치 파일.
+출력: 파싱된 원본 스왑 거래 레코드 데이터. 이 데이터는 전처리되어 데이터베이스나 메시지 큐로 전달됩니다.
+Realtime Listener (실시간 스트림 인제션):
+역할: Vo fep 등으로부터 실시간으로 발생하는 스왑 거래 또는 생애주기 이벤트 데이터를 스트림 형태로 수신합니다.
+입력: 실시간 데이터 스트림 (네트워크 소켓, 메시지 큐 구독 등).
+출력: 수신된 실시간 스왑 거래 레코드 데이터. 이 데이터는 전처리되어 데이터베이스나 메시지 큐로 전달됩니다.
+3. 데이터 처리 레이어 (Data Processing Layer):
+
+TainOn (실시간 데이터 처리):
+역할: Realtime Listener로부터 전달받은 개별 실시간 데이터 레코드를 즉시 처리합니다. 기본적인 유효성 검증, 데이터 정규화, 그리고 AI Inference Service를 호출하여 실시간 이상치 탐지 추론을 수행합니다.
+입력: 실시간 데이터 레코드.
+출력: 처리된 실시간 데이터 레코드 (AI 이상치 결과 포함). 이 데이터는 데이터베이스에 저장되고, 이상 탐지 시 Alert/보고서 생성이 트리거될 수 있습니다.
+TainBat (배치 데이터 처리):
+역할: TainTube로부터 인제션된 배치 데이터를 처리하거나, 데이터베이스에 저장된 데이터를 주기적으로 읽어와 처리합니다. 대규모 유효성 검증, 데이터 변환, 집계, 보고서 형식 변환, 그리고 AI Inference Service를 호출하여 배치 이상 탐지 추론을 수행합니다. AI 모델 재학습 워크플로우의 실행 주체이기도 합니다.
+입력: 배치 데이터 (파일 또는 DB 조회).
+출력: 처리된 배치 데이터 (AI 이상치 결과 포함), 보고서 파일, 통계 데이터.
+4. 데이터 저장소 레이어 (Data Storage Layer):
+
+원본 데이터 저장소: TainTube/Realtime Listener를 통해 인제션된 원본 데이터를 저장합니다. (분산 파일 시스템, Object Storage)
+처리 데이터베이스 (Cloud DB for PostgreSQL 등):
+역할: TainOn 및 TainBat에 의해 처리, 검증, 정규화된 스왑 거래 레코드 데이터, AI 예측 결과, 수동 검토 상태, 정정 이력 등을 저장합니다. 시스템 운영의 핵심 데이터베이스입니다.
+구성: 고성능의 관계형 데이터베이스.
+보고서 저장소: 생성된 최종 보고서 파일(KTFC 보고서, 내부 이상 보고서, 누적 보고서 등)을 보관합니다. (Object Storage, 분산 파일 시스템)
+모델 저장소: 학습된 AI 모델 파일들을 버전별로 관리하고 저장합니다. (Object Storage, 별도 모델 저장소 솔루션)
+로그 및 메트릭 저장소: 시스템 운영 로그 및 성능 모니터링 메트릭 데이터를 저장합니다. (ELK Stack, Prometheus/Grafana 연동 스토리지)
+5. AI/ML 레이어 (AI/ML Layer):
+
+AI Inference Service:
+역할: 학습된 AI 모델(이상치 탐지 앙상블 모델 등)을 로드하고, TainOn 또는 TainBat로부터 추론 요청을 받아 GPU 가속을 사용하여 빠르게 예측 결과를 반환합니다. GPU 서버(VM/Node)에서 실행됩니다.
+구성: NVIDIA Triton Inference Server 등 전용 추론 서빙 솔루션 또는 직접 구현한 API 서비스.
+ML Training Service / Module:
+역할: scheduler.py에 의해 트리거되어 주기적으로(예: 매주) 데이터베이스에서 학습 데이터를 샘플링하고, 여러 AI 모델(Isolation Forest, One-Class SVM, Autoencoder)을 학습/재학습하며, 모델 평가 및 앙상블 모델 구성을 수행합니다. 고성능 GPU 서버(VM/Node)에서 실행됩니다.
+구성: 학습 스크립트, 학습 라이브러리, 워크플로우 관리 (내부적으로 TainBat 프레임워크 활용 가능).
+6. 프레젠테이션 레이어 (Presentation Layer):
+
+UI 백엔드 (ui_backend - api.py, processing.py):
+역할: 사용자 인터페이스(TainWeb)의 요청을 받아 처리하고 데이터를 제공합니다. Prompt 처리, 캐시된 결과 조회, 레코드 상세 조회, 검토 결과 제출 등 사용자 인터랙션에 필요한 로직을 수행합니다. 다른 서비스(AI, DB, 보고서 서비스)와 연동됩니다.
+구성: FastAPI 등 웹 프레임워크 기반 API 서비스.
+TainWeb (Frontend UI):
+역할: 사용자가 시스템과 상호 작용하는 웹 기반 인터페이스입니다. 데이터 조회, 보고서 확인, 이상 탐지 결과 확인, 수동 검토 및 보정 작업, 시스템 상태 모니터링 등을 수행합니다. UI 백엔드 API를 호출합니다.
+구성: 웹 브라우저에서 실행되는 프론트엔드 애플리케이션 (React, Vue, Angular 등).
+7. 외부 인터페이스 레이어 (External Interfaces Layer):
+
+Vo fep:
+역할: 외부 시스템(거래 시스템 등)과 시스템 간의 데이터 교환 및 연동을 담당하는 게이트웨이. Realtime Listener가 Vo fep를 통해 데이터를 수신하거나, TainBat/보고서 서비스가 Vo fep를 통해 KTFC/SDR로 보고서를 전송할 수 있습니다.
+KTFC / CFTC SDRs:
+역할: 최종적으로 처리 및 검증된 보고서 데이터가 전송되는 규제 당국의 SDR 시스템입니다. TainBat 또는 별도의 보고서 전송 모듈이 이들 시스템의 보고서 수신 채널(SFTP, API 등)을 통해 데이터를 전송합니다.
+8. 관리 및 오케스트레이션 레이어 (Management & Orchestration Layer):
+
+TainBat Scheduler (scheduler.py):
+역할: 시스템의 모든 주기적 및 배치 작업을 관리하고 트리거합니다 (AI 학습, 배치 이상 탐지, 일별/누적 보고서 생성 및 전송 등).
+구성: 스케줄링 엔진.
+모니터링 시스템:
+역할: 시스템 각 구성 요소의 상태, 성능 지표(CPU/GPU 사용률, 메모리, 네트워크 트래픽, 응답 시간, 오류율 등)를 수집, 분석, 시각화합니다.
+구성: Prometheus, Grafana 등 메트릭 수집/시각화 툴.
+로깅 시스템:
+역할: 시스템에서 발생하는 모든 로그를 수집, 저장, 검색, 분석합니다.
+구성: ELK Stack (Elasticsearch, Logstash, Kibana) 등.
+알림 시스템 (Alerting System):
+역할: 모니터링 시스템에서 감지된 이상 징후 또는 애플리케이션에서 발생한 중요한 이벤트(이상치 탐지, 오류 발생, 보고서 전송 실패 등)를 담당자에게 통지합니다 (이메일, SMS, 메신저 등).
+구성: Alertmanager 등 알림 관리 툴.
+수동 검토/정정 워크플로우 관리:
+역할: AI가 플래그한 항목들을 검토 대상 목록으로 관리하고, 담당자의 수동 검토 및 데이터 보정/AI 오버라이드 결과를 반영하며, 정정 보고서 생성을 트리거하는 프로세스 및 UI (TainWeb 내 기능 또는 별도 툴).
+데이터 흐름 예시:
+
+실시간 처리: Realtime Listener -> (DB 일시 저장 또는 직접 전달) -> TainOn (기본 검증 -> AI Inference Service 호출 -> 결과 반영) -> DB 저장 -> (이상 탐지 시) -> Alerting System & Reporting Service (즉시 보고).
+배치 처리: TainTube (파일) -> 원본 데이터 저장소 -> TainBat (데이터 로딩 -> 변환/집계 -> AI Inference Service 호출 -> 결과 반영) -> DB 저장 -> (이상 탐지 시) -> 로깅 또는 Alerting System.
+주간 AI 학습: Scheduler -> ML Training Service/Module (DB에서 데이터 샘플링 -> 학습 -> 평가 -> 앙상블 구성) -> 모델 저장소에 모델 배포.
+일별 보고: Scheduler -> TainBat (DB에서 데이터 조회 -> 보고서 형식 변환) -> 보고서 저장소 -> (Vo fep 통해) -> KTFC SDR 전송.
+이상치 검토/정정: AI 플래그된 데이터 (DB) -> TainWeb (UI) (담당자 검토 -> 데이터 수정 또는 AI 오버라이드) -> DB 업데이트 -> (정정 보고 대상 식별 시) -> TainBat/정정 보고 모듈 -> (Vo fep 통해) -> KTFC/CFTC SDR 정정 보고.
+배포 환경 매핑:
+
+CPU VM/Node: TainTube, Realtime Listener, TainBat (AI 제외), TainOn (AI 제외), UI 백엔드, Scheduler, 모니터링, 로깅, 알림 시스템 컴포넌트들이 배포됩니다. On-premise 또는 NCP 클라우드 모두 가능합니다. Windows Server가 필요한 레거시 컴포넌트는 Windows VM/Node에 배포됩니다.
+GPU VM/Node: AI Inference Service, ML Training Service/Module이 배포됩니다. 고성능 GPU가 필요하며, Linux OS가 일반적입니다. On-premise 또는 NCP 클라우드 GPU VM에 배포됩니다.
+Cloud Managed Services: Cloud DB, Object Storage, File Storage, Message Queue, Load Balancer, API Gateway 등은 클라우드 제공업체의 관리형 서비스로 활용될 가능성이 높습니다.
