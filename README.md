@@ -375,3 +375,14 @@ TainBat Scheduler (scheduler.py):
 CPU VM/Node: TainTube, Realtime Listener, TainBat (AI 제외), TainOn (AI 제외), UI 백엔드, Scheduler, 모니터링, 로깅, 알림 시스템 컴포넌트들이 배포됩니다. On-premise 또는 NCP 클라우드 모두 가능합니다. Windows Server가 필요한 레거시 컴포넌트는 Windows VM/Node에 배포됩니다.
 GPU VM/Node: AI Inference Service, ML Training Service/Module이 배포됩니다. 고성능 GPU가 필요하며, Linux OS가 일반적입니다. On-premise 또는 NCP 클라우드 GPU VM에 배포됩니다.
 Cloud Managed Services: Cloud DB, Object Storage, File Storage, Message Queue, Load Balancer, API Gateway 등은 클라우드 제공업체의 관리형 서비스로 활용될 가능성이 높습니다.
+
+
+=============================
+
+각 파일의 역할 및 연동:
+
+tain_tube/file_listener.py: 감시 디렉터리에 새 파일이 생기면 parse_swap_file (동일 모듈 또는 file_parser.py의 함수)를 호출하여 파싱하고, ingest_parsed_data (data_ingestor.py의 함수)를 호출하여 DB/Queue에 데이터를 적재하도록 합니다.
+tain_bat/batch_processor.py: scheduler.py에 의해 run_daily_batch_processing 함수가 호출됩니다. 이 함수는 get_data_for_batch_processing 함수(개념적인 DB 로드 함수)를 호출하여 데이터를 가져오고, perform_batch_anomaly_check (batch_anomaly_checker.py의 함수)를 호출하여 배치 이상 탐지를 실행하며, generate_ktfc_report (reporting_service/report_generator.py의 함수)를 호출하여 보고서를 만들고, send_report_to_ktfc (reporting_service/report_transmitter.py의 함수)를 호출하여 전송합니다.
+ai_inference_service/inference_api.py: FastAPI 앱으로 실행되며, /predict_anomaly 등의 API 엔드포인트를 제공합니다. TainOn의 tainon_processor.py나 TainBat의 batch_anomaly_checker.py 등에서 HTTP 또는 gRPC 요청을 보내 이 API를 호출합니다. GPU 자원은 이 서비스가 실행되는 서버에서 사용됩니다.
+reporting_service/report_generator.py: 보고서 생성 로직을 담고 있으며, tain_bat/batch_processor.py 또는 scheduler.py 등에서 호출됩니다.
+scripts/run_sample_workflow.sh: 개발/테스트 환경에서 위에서 설명된 각 서비스(컨테이너)를 실행하거나, 특정 배치 워크플로우를 순차적으로 트리거하는 간단한 스크립트입니다. 실제 운영 환경에서는 Kubernetes Manifest 파일, Docker Compose, 또는 클라우드 워크플로우 서비스(Step Functions 등)가 이러한 서비스의 배포, 실행, 관리, 연동을 담당합니다.
