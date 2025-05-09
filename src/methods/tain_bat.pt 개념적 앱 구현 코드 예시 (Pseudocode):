@@ -1,0 +1,41 @@
+// 백엔드 (TainBat 또는 별도의 분석 서비스 - Python)
+
+# 주기적인 이상치 추이 분석 배치 작업
+def analyze_anomaly_trends_batch():
+    print("--- 배치 이상치 추이 분석 시작 ---")
+    # DB에서 과거 이상치 시계열 데이터 로딩
+    # 예: anomaly_data = db.query("SELECT date, COUNT(*) as count FROM anomaly_logs GROUP BY date ORDER BY date")
+
+    # 로딩된 데이터로 추세선 계산 또는 변화율 분석
+    # 예: trend_slope = calculate_trend_slope(anomaly_data)
+    # 예: current_week_avg = calculate_average(last_7_days_data)
+    # 예: previous_week_avg = calculate_average(previous_7_days_data)
+
+    # 분석 결과 기반 알림 조건 판단
+    # if trend_slope > 0.1 or (current_week_avg / previous_week_avg) > 1.5: # 예시 조건
+    #     trigger_alert_system("이상치 발생 추이 비정상 감지")
+
+    print("--- 배치 이상치 추이 분석 완료 ---")
+
+
+# 모델 드리프트 감지 배치 작업 (모델 재학습 트리거)
+def detect_model_drift_and_trigger_retrain():
+    print("--- 모델 드리프트 감지 시작 ---")
+    # DB에서 과거 모델 성능 지표 시계열 데이터 로딩 또는 최신 평가 결과 로딩
+    # 예: latest_performance = db.query("SELECT * FROM model_performance ORDER BY date DESC LIMIT 1")
+    # 예: past_average_performance = db.query("SELECT AVG(roc_auc) FROM model_performance WHERE date BETWEEN ...")
+
+    # 현재 성능과 과거 평균 성능 비교 또는 통계적 검정 수행
+    # 예: if latest_performance.roc_auc < (past_average_performance.avg_roc_auc * 0.9): # 성능 10% 하락 시
+    #     print("  - 모델 성능 하락 감지. 재학습 트리거.")
+    #     trigger_model_retrain_workflow() # 모델 재학습 워크플로우 호출
+    # else:
+    #     print("  - 모델 성능 정상.")
+
+    print("--- 모델 드리프트 감지 완료 ---")
+
+
+# 모델 재학습 워크플로우 트리거 함수 (개념적)
+def trigger_model_retrain_workflow():
+    print("  - 모델 재학습 워크플로우 트리거 호출...")
+    # TODO: Kubernetes Job 실행, 별도 학습 서비스 호출 등 실제 재학습 시작 로직 구현
