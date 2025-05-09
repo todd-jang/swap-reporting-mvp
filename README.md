@@ -181,3 +181,107 @@ docker build -t swap-reporting-ui-backend:latest -f ui_backend/Dockerfile .
 이 백엔드 서비스는 setup.py를 사용하여 파이썬 패키지로 만들거나, Dockerfile을 사용하여 컨테이너 이미지로 패키징하여 배포 준비를 합니다.
 Docker 컨테이너화 방식이 현대적인 클라우드 환경 배포에 더 적합하며, Kubernetes와 같은 오케스트레이션 도구를 활용하기 용이합니다.
 제공해 드린 HTML 예시와 파이썬 패키징/Dockerizing 가이드를 바탕으로 여러분의 실제 UI 및 백엔드 코드에 맞춰 개발 및 패키징 작업을 진행하시면 됩니다.
+
+
+=================================
+
+ai gpu server를 포함한 repo
+
+swap_reporting_mvp/
+├── common/                 # 시스템 전반에서 공유되는 공통 코드 및 정의
+│   ├── __init__.py         # Python 패키지 초기화
+│   ├── data_models.py      # 데이터 모델 정의 (Pydantic 등)
+│   └── utils.py            # 공통 유틸리티 함수 모음
+│
+├── tain_tube/              # 파일 기반 데이터 인제션 서비스
+│   ├── __init__.py
+│   ├── file_listener.py    # 파일 감지 및 처리 시작
+│   ├── file_parser.py      # 파일 형식 파싱 로직
+│   ├── data_ingestor.py    # 파싱된 데이터를 DB/Queue로 전달
+│   ├── requirements.txt    # TainTube 서비스 의존성
+│   └── Dockerfile          # TainTube 서비스 컨테이너화
+│
+├── tain_on/                # 실시간 데이터 처리 서비스
+│   ├── __init__.py
+│   ├── realtime_listener.py # 실시간 데이터 수신 및 전달
+│   ├── tainon_processor.py  # 개별 실시간 레코드 처리 로직 (AI 추론 호출 등)
+│   ├── requirements.txt    # TainOn 서비스 의존성
+│   └── Dockerfile          # TainOn 서비스 컨테이너화
+│
+├── tain_bat/               # 배치 데이터 처리 및 스케줄링 서비스
+│   ├── __init__.py
+│   ├── scheduler.py        # 스케줄링 정의 및 작업 트리거
+│   ├── batch_processor.py  # 대규모 배치 데이터 처리 로직 (변환, 집계 등)
+│   ├── batch_anomaly_checker.py # 배치 이상 탐지 실행 로직
+│   ├── requirements.txt    # TainBat 서비스 의존성
+│   └── Dockerfile          # TainBat 서비스 컨테이너화
+│
+├── ui_backend/             # 사용자 인터페이스(TainWeb) 백엔드 API 서비스
+│   ├── __init__.py
+│   ├── api.py              # FastAPI 앱 정의 및 API 엔드포인트
+│   ├── processing.py       # UI 요청 처리 비즈니스 로직 (다른 서비스 호출)
+│   ├── requirements.txt    # UI 백엔드 서비스 의존성
+│   └── Dockerfile          # UI 백엔드 서비스 컨테이너화
+│
+├── ai_inference_service/   # AI 모델 추론 전용 서비스 (GPU 활용)
+│   ├── __init__.py
+│   ├── inference_api.py    # 추론 요청 수신 API (gRPC 또는 REST)
+│   ├── model_loader.py     # 모델 로딩 및 관리
+│   ├── model_predictor.py  # 실제 추론 실행 로직 (GPU 라이브러리 사용)
+│   ├── requirements.txt    # AI Inference 서비스 의존성 (GPU 관련 포함)
+│   └── Dockerfile          # AI Inference 서비스 컨테이너화
+│
+├── ml_training_service/    # AI 모델 학습 전용 서비스 (GPU 활용)
+│   ├── __init__.py
+│   ├── training_workflow.py # 학습 워크플로우 정의 (Scheduler에 의해 트리거)
+│   ├── data_sampler.py     # DB 등에서 학습 데이터 샘플링
+│   ├── model_trainer.py    # 실제 모델 학습 로직 (다양한 모델, GPU 라이브러리 사용)
+│   ├── model_evaluator.py  # 모델 평가 및 비교
+│   ├── model_saver.py      # 학습된 모델 저장소에 저장
+│   ├── requirements.txt    # ML Training 서비스 의존성 (GPU 관련, ML 프레임워크 포함)
+│   └── Dockerfile          # ML Training 서비스 컨테이너화
+│
+├── reporting_service/      # 보고서 생성 및 전송 서비스
+│   ├── __init__.py
+│   ├── report_generator.py # 다양한 보고서 형식 생성 로직 (KTFC, 누적 등)
+│   ├── report_transmitter.py # 생성된 보고서를 외부 시스템(KTFC/SDR)으로 전송
+│   ├── requirements.txt    # Reporting 서비스 의존성
+│   └── Dockerfile          # Reporting 서비스 컨테이너화
+│
+├── alerting_service/       # 시스템 알림 발송 서비스
+│   ├── __init__.py
+│   ├── alert_manager.py    # 알림 규칙 관리
+│   ├── notification_sender.py # 이메일, 메신저 등 실제 알림 발송 로직
+│   ├── requirements.txt    # Alerting 서비스 의존성
+│   └── Dockerfile          # Alerting 서비스 컨테이너화
+│
+├── tests/                  # 시스템 테스트 코드 모음
+│   ├── unit/               # 단위 테스트
+│   │   └── test_utils.py
+│   ├── integration/        # 통합 테스트 (서비스 간 연동, Mocking 등)
+│   │   └── test_ui_backend_integration.py
+│   └── performance/        # 성능 테스트 (부하 테스트 등)
+│       └── test_ui_backend_performance.py
+│
+├── docs/                   # 프로젝트 문서 (설계 문서, 사용자 가이드 등)
+│   ├── architecture.md
+│   ├── data_model.md
+│   └── ...
+│
+├── deployment/             # 배포 관련 설정 파일 (Kubernetes YAML, Docker Compose 등)
+│   ├── kubernetes/
+│   │   ├── tain_on.yaml
+│   │   ├── ui_backend.yaml
+│   │   ├── ai_inference.yaml
+│   │   └── ...
+│   ├── docker-compose.yaml # 개발/테스트 환경용
+│   └── ...
+│
+├── scripts/                # 유용한 스크립트 (빌드, 배포, DB 초기화 등)
+│   ├── build_images.sh
+│   ├── deploy.sh
+│   └── ...
+│
+├── README.md               # 프로젝트 개요 및 설정 방법
+├── requirements.txt        # 개발 환경 설정 또는 전체 프로젝트 공통 의존성
+└── .gitignore              # Git 버전 관리에서 제외할 파일/디렉터리 지정
