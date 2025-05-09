@@ -9,3 +9,22 @@
 실시간 이상 탐지: TainTube를 통해 수집된 실시간 데이터가 TainOn으로 전달될 때, TainOn은 배포된 모델을 사용하여 이상치 여부를 평가하고 이상 탐지 시 Alert 및 보고서 작성을 트리거합니다.
 배치 이상 탐지: TainBat가 주기적으로 DB의 데이터를 읽어와 배포된 모델을 사용하여 이상치 여부를 평가하고, 이상 탐지 시 Alert 및 보고서 작성을 수행합니다.
 정상 데이터 처리: 실시간 데이터 중 이상이 없는 경우 (또는 특정 분류 라벨)는 요약 리포트를 작성하고 보관합니다. 이상 탐지된 데이터와 분리하여 관리합니다.
+
+
+------------------------
+
+코드 설명 및 요청 반영 부분:
+
+데이터 샘플링 (sample_and_load_data): 특정 시간 범위와 주기(sample_rate)에 따라 데이터 소스에서 데이터를 샘플링하는 개념적인 로직을 포함합니다. 실제 구현 시 DB 쿼리나 파일 읽기 로직으로 대체됩니다.
+모델 학습 및 업데이트 (train_multiple_anomaly_models): IsolationForest, OneClassSVM, SimpleAutoencoderAnomalyDetector (개념적 구현) 여러 모델을 동시에 학습합니다. 각 모델은 model_configs에 정의된 파라미터로 초기화됩니다. 학습 완료 후 학습된 모델 객체를 딕셔너리로 반환합니다.
+(선택) 모델 평가 및 비교 (evaluate_and_compare_models): 학습되지 않은 평가 데이터셋(X_test_eval, y_test_eval)을 사용하여 학습된 각 모델의 성능을 평가합니다. ROC AUC, Precision, Recall, F1-Score 등 이상치 탐지에 중요한 지표들을 계산하고 비교 결과를 출력합니다.
+모델 저장 및 배포 (save_and_deploy_model): 학습이 완료된 모델 객체를 파일로 저장(joblib)하고 개념적인 모델 저장소 경로에 배치합니다. 실제로는 Object Storage 등에 버전 관리와 함께 저장/업로드됩니다.
+모델 로딩 (load_deployed_model): 예측에 사용하기 위해 배포된 모델 파일을 로딩하여 모델 객체를 메모리로 가져옵니다.
+실시간 이상 탐지 (realtime_anomaly_check): TainOn에서 호출될 수 있는 함수로, 들어오는 단일 레코드를 배포된 여러 모델 모두로 평가합니다. 어떤 모델이라도 이상치로 판단(prediction == -1)하면 이상 탐지 Alert 및 보고서 작성을 트리거합니다. 이상 탐지되지 않은 경우 정상 데이터 처리 로직(요약 리포트 등)을 수행합니다.
+배치 이상 탐지 (batch_anomaly_check): TainBat에서 호출될 수 있는 함수로, 들어오는 배치 데이터 전체를 배포된 여러 모델 모두로 평가합니다. 하나의 모델이라도 특정 데이터를 이상치로 판단하면 해당 데이터를 이상치 목록에 포함시키고, 배치 내 총 이상 데이터 수가 기준을 넘으면 Alert 및 보고서 작성을 트리거합니다.
+모델 성능 최저 모델 재확인 (identify_lowest_performing_model): evaluate_and_compare_models의 비교 결과(성능 지표)를 바탕으로 **성능이 가장 낮은 모델(예: ROC AUC 최저)**을 식별하는 로직을 추가했습니다. 이 모델을 실제 '재확인'에 어떻게 활용할지는 추가적인 설계 및 로직 구현이 필요합니다.
+분산 환경 개념: 코드는 여전히 단일 스크립트 형태이지만, 각 함수를 "Worker 함수"로 분리하고 명확한 입출력을 정의함으로써 다음과 같은 분산 환경 구현의 기반을 마련합니다.
+sample_and_load_data: 여러 데이터 로딩 Worker가 병렬로 데이터를 읽어올 수 있습니다.
+train_multiple_anomaly_models: 각 모델 학습을 별도의 Worker에게 할당하여 병렬 학습이 가능합니다.
+realtime_anomaly_check: 여러 TainOn Worker가 동시에 들어오는 실시간 데이터를 처리하며 이 함수를 호출할 수 있습니다.
+batch_anomaly_check: 배치 데이터를 여러 청크로 나누어 여러 TainBat Worker가 병렬로 처리하고 결과를 합치는 형태로 확장될 수 있습니다.
