@@ -60,3 +60,5 @@ pytest 명령어를 사용하여 실행합니다. tests/unit 디렉터리에서 
 pytest tests/unit/
 # 또는 프로젝트 루트에서
 # pytest tests/unit/test_utils.py
+
+pytest tests/integration/
