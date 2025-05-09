@@ -1,0 +1,115 @@
+# ai_inference_service/inference_api.py
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import List, Dict, Any
+import numpy as np
+import random # 시뮬레이션용
+# import model_loader # 모델 로딩 유틸리티
+# from common.data_models import AnomalyPredictionResult # 공통 데이터 모델 사용
+
+# --- 개념적인 모델 로딩 (실제는 모델 파일 로드) ---
+# TODO: 실제 학습된 모델 파일 로드 로직 구현
+# loaded_ensemble_model = model_loader.load_model('EnsembleAnomalyDetector', version='latest')
+print("AI Inference Service: 모델 로딩 시뮬레이션...")
+time.sleep(1) # 로딩 시간 시뮬레이션
+print("AI Inference Service: 모델 로딩 완료 시뮬레이션.")
+
+# --- API 요청/응답 모델 ---
+# common.data_models.SwapRecord 에서 특징만 추출한 형태 또는 특징 벡터 자체를 입력받도록 설계
+class InferenceRequest(BaseModel):
+    """
+    추론 요청 모델. 원본 데이터 레코드 또는 전처리된 특징 벡터를 포함.
+    실제로는 필요한 특징 필드 또는 features: List[List[float]] 등 설계에 따라 달라짐.
+    """
+    # 예시: 필요한 특징 데이터만 받거나, 원본 레코드 일부를 받아서 내부 전처리
+    record_id: str # 요청을 보낸 레코드 식별자 (결과 매핑용)
+    features: List[float] # 전처리된 특징 벡터 (단일 샘플) 예시
+
+
+class BatchInferenceRequest(BaseModel):
+     """
+     배치 추론 요청 모델. 여러 개의 샘플 특징 벡터를 포함.
+     """
+     records: List[InferenceRequest]
+
+
+# --- FastAPI 애플리케이션 정의 ---
+app = FastAPI(
+    title="AI Inference Service API",
+    description="API for AI model inference (Anomaly Detection).",
+    version="0.1.0",
+)
+
+@app.post("/predict_anomaly", response_model=AnomalyPredictionResult)
+async def predict_anomaly_single(request: InferenceRequest):
+    """
+    단일 스왑 레코드 특징에 대한 이상치 추론 요청 처리.
+    """
+    # print(f"\n--- Inference API: /predict_anomaly 호출 (Record: {request.record_id}) ---")
+    # if loaded_ensemble_model is None:
+    #     raise HTTPException(status_code=503, detail="Model not loaded")
+
+    try:
+        # TODO: 전처리된 특징 벡터를 사용하여 모델 추론 실행
+        # features_np = np.array([request.features]) # NumPy 배열로 변환
+        # score = loaded_ensemble_model.decision_function(features_np)[0]
+        # prediction_label = "이상치" if score < -0.5 else "정상" # 예시 임계값
+
+        # 시뮬레이션 추론 결과 생성
+        score = random.uniform(-1.0, 1.0)
+        prediction_label = "이상치" if score < random.uniform(-0.7, -0.3) else "정상"
+
+        result = AnomalyPredictionResult(
+            model_name="EnsembleAnomalyDetector", # 사용 모델 이름
+            score=score,
+            prediction_label=prediction_label
+        )
+        # print(f"  - 추론 완료: Score={result.score:.4f}, Label={result.prediction_label}")
+        return result
+
+    except Exception as e:
+        print(f"--- Inference API 오류: /predict_anomaly - {e} ---")
+        raise HTTPException(status_code=500, detail=f"Inference Error: {e}")
+
+@app.post("/predict_anomaly_batch", response_model=List[AnomalyPredictionResult])
+async def predict_anomaly_batch(request: BatchInferenceRequest):
+    """
+    배치 스왑 레코드 특징에 대한 이상치 추론 요청 처리.
+    """
+    print(f"\n--- Inference API: /predict_anomaly_batch 호출 ({len(request.records)} 건) ---")
+    # if loaded_ensemble_model is None:
+    #     raise HTTPException(status_code=503, detail="Model not loaded")
+
+    try:
+        # TODO: 배치 전처리된 특징 벡터들을 사용하여 모델 배치 추론 실행
+        # batch_features_np = np.array([rec.features for rec in request.records])
+        # batch_scores = loaded_ensemble_model.decision_function(batch_features_np)
+        # batch_predictions = loaded_ensemble_model.predict(batch_features_np)
+
+        results = []
+        for i in range(len(request.records)):
+             # 시뮬레이션 배치 추론 결과 생성
+             score = random.uniform(-1.0, 1.0)
+             prediction_label = "이상치" if score < random.uniform(-0.7, -0.3) else "정상"
+
+             results.append(AnomalyPredictionResult(
+                 model_name="EnsembleAnomalyDetector",
+                 score=score,
+                 prediction_label=prediction_label
+             ))
+
+        print(f"  - 배치 추론 완료 ({len(results)} 결과).")
+        return results
+
+    except Exception as e:
+        print(f"--- Inference API 오류: /predict_anomaly_batch - {e} ---")
+        raise HTTPException(status_code=500, detail=f"Batch Inference Error: {e}")
+
+# --- 애플리케이션 실행 (개발용) ---
+# 실제 배포 시에는 uvicorn과 같은 ASGI 서버를 사용합니다.
+# if __name__ == "__main__":
+#     import uvicorn
+#     print("\nAI Inference Service API 실행 중 (개발 모드)...")
+#     uvicorn.run(app, host="0.0.0.0", port=8001) # UI 백엔드와 다른 포트 사용
+#     print("AI Inference Service API 종료.")
