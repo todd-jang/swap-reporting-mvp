@@ -115,3 +115,69 @@ Sheets
 "swap-reporting-mvp" 프로젝트는 On-premise 데이터 수집, 클라우드 기반 처리/저장, API를 통한 서비스 제공 등 여러 분산된 구성 요소의 복합적인 연동으로 이루어집니다. NCP를 사용하면 Cloud Connect, API Gateway, Cloud DB, Load Balancer, 메시지 큐 등 다양한 관리형 서비스를 활용하여 이러한 연동을 효율적이고 안정적이며 확장 가능하게 구축할 수 있습니다.
 
 MVP 단계에서는 기능을 빠르게 구현하기 위해 간단한 연동 방식(직접 파일 전송, 기본 리버스 프록시 등)을 사용할 수 있지만, 프로덕션 환경에서는 보안성, 가용성, 확장성을 고려하여 NCP의 관리형 서비스를 적극적으로 도입하고 자동화된 배포 및 운영 환경을 구축하는 것이 필수적입니다. 프론트엔드와 백엔드는 API Gateway를 통해 연동하는 것이 가장 표준적이고 관리 용이한 방식입니다.
+
+=======================================================
+
+패키징 실행:
+
+프로젝트 루트 디렉터리에서 다음 명령어를 실행합니다.
+
+Bash
+
+pip install . # 로컬 환경에 패키지 설치
+pip install . --target=./dist # ./dist 디렉터리에 설치 (배포용)
+python setup.py sdist bdist_wheel # 소스 배포본(.tar.gz) 및 Wheel 배포본(.whl) 생성
+생성된 .whl 파일은 다른 환경에서 pip install your_package_name.whl 명령으로 설치할 수 있습니다.
+
+Docker 컨테이너를 사용한 패키징:
+
+백엔드 서비스를 Docker 컨테이너로 패키징하는 것이 배포 및 오케스트레이션에 가장 일반적이고 권장되는 방법입니다.
+
+swap_reporting_mvp/ui_backend/Dockerfile
+
+Dockerfile
+
+# swap_reporting_mvp/ui_backend/Dockerfile
+
+# Docker 컨테이너화 예시 (FastAPI 앱 가정)
+FROM python:3.9-slim # 가벼운 Python 이미지 사용
+
+WORKDIR /app # 컨테이너 내 작업 디렉터리 설정
+
+# 의존성 파일만 먼저 복사하여 빌드 캐싱 활용
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 나머지 애플리케이션 코드 복사
+# setup.py를 사용한다면, 여기서 setup.py와 ui_backend/ 디렉터리를 복사하고
+# RUN pip install . 으로 설치하는 방식을 사용할 수도 있습니다.
+COPY ui_backend/ /app/ui_backend/
+COPY .env /app/.env # 환경 변수 파일 복사 (보안 주의: Secrets Manager 권장)
+
+# 필요한 포트 노출 (FastAPI 기본 포트 8000 가정)
+EXPOSE 8000
+
+# 애플리케이션 실행 명령어 (uvicorn 사용 예시)
+# ui_backend/api.py 파일에 FastAPI 앱 객체 'app'이 있다고 가정
+CMD ["uvicorn", "ui_backend.api:app", "--host", "0.0.0.0", "--port", "8000"]
+
+Docker 이미지 빌드:
+
+프로젝트 루트 디렉터리에서 또는 ui_backend/ 디렉터리로 이동하여 다음 명령 실행.
+
+Bash
+
+# 프로젝트 루트에서 실행 시
+docker build -t swap-reporting-ui-backend:latest -f ui_backend/Dockerfile .
+
+# ui_backend/ 디렉터리로 이동하여 실행 시
+# docker build -t swap-reporting-ui-backend:latest .
+빌드된 이미지는 NCP Container Registry에 Push 하여 관리하고, Kubernetes Service 등에서 이 이미지를 사용하여 배포합니다.
+
+요약:
+
+사용자 스크린은 HTML, CSS, JavaScript로 구현하며, 백엔드 파이썬 API와 통신합니다.
+이 UI를 지원하는 백엔드 파이썬 앱은 Prompt 처리 및 결과 반환 기능을 제공하는 API 서비스입니다.
+이 백엔드 서비스는 setup.py를 사용하여 파이썬 패키지로 만들거나, Dockerfile을 사용하여 컨테이너 이미지로 패키징하여 배포 준비를 합니다.
+Docker 컨테이너화 방식이 현대적인 클라우드 환경 배포에 더 적합하며, Kubernetes와 같은 오케스트레이션 도구를 활용하기 용이합니다.
+제공해 드린 HTML 예시와 파이썬 패키징/Dockerizing 가이드를 바탕으로 여러분의 실제 UI 및 백엔드 코드에 맞춰 개발 및 패키징 작업을 진행하시면 됩니다.
