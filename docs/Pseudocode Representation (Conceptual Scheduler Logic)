@@ -1,0 +1,86 @@
+# Conceptual Scheduler Logic Fragment
+
+def schedule_pod(pod):
+    if pod.status is not Pending:
+        return # Only schedule pending pods
+
+    # Get Pod's Priority and Resource Requirements
+    pod_priority = pod.priority_class.value
+    pod_requests = pod.spec.containers[0].resources.requests # CPU, Memory, GPU etc.
+
+    suitable_nodes = find_nodes_matching_selectors(pod)
+
+    best_node = None
+    preemption_candidates = [] # List of lower-priority pods that *could* be preempted
+
+    for node in suitable_nodes:
+        available_resources = node.get_available_resources()
+
+        if node_has_enough_resources(node, pod_requests):
+            best_node = node
+            break # Found a suitable node with enough resources
+
+        else:
+            # Node doesn't have enough AVAILABLE resources, but *might* if some pods were evicted
+            lower_priority_pods_on_node = node.get_running_pods(filter_by_priority=lambda p: p.priority_class.value < pod_priority)
+
+            if lower_priority_pods_on_node:
+                resources_freed_by_evicting = sum(pod.get_resource_requests() for pod in lower_priority_pods_on_node)
+                if node_has_enough_resources(node, pod_requests, consider_freed=resources_freed_by_evicting):
+                    # This node could potentially run the pod if we preempt
+                    # Add this node and its lower-priority pods as preemption candidates
+                    preemption_candidates.append({'node': node, 'pods_to_evict': lower_priority_pods_on_node})
+
+
+    if best_node:
+        # Scenario A: Schedule the pod on the best node with available resources
+        assign_pod_to_node(pod, best_node)
+        print(f"Scheduler: Scheduled Pod {pod.name} on Node {best_node.name} (available resources)")
+
+    elif preemption_candidates:
+        # Scenario B: No node has available resources, but preemption is possible
+        # Choose the best node from preemption candidates (e.g., least disruption, most resources freed)
+        chosen_candidate = select_best_preemption_candidate(preemption_candidates)
+        target_node = chosen_candidate['node']
+        pods_to_evict = chosen_candidate['pods_to_evict']
+
+        # Trigger eviction for lower-priority pods on the target node
+        trigger_eviction(pods_to_evict)
+        print(f"Scheduler: Initiating preemption on Node {target_node.name} to schedule Pod {pod.name} (evicting {len(pods_to_evict)} pods)")
+
+        # The pod will be scheduled on the target node *after* resources are freed by eviction
+        # (Kubernetes handles this implicitly or with a rescheduling step)
+        mark_pod_for_scheduling_after_preemption(pod, target_node)
+
+
+    else:
+        # Scenario C: No suitable node with available resources, and no preemption possible
+        print(f"Scheduler: Pod {pod.name} remains Pending. No suitable node with available resources or preemption targets.")
+        # The pod stays in the pending queue
+
+
+# --- Helper functions (Conceptual) ---
+def find_nodes_matching_selectors(pod):
+    # Filters nodes based on pod.spec.nodeSelector, affinity, etc.
+    pass
+def node_has_enough_resources(node, requests, consider_freed=0):
+    # Checks if node.available_resources + consider_freed >= requests
+    pass
+def node.get_running_pods(filter_by_priority):
+    # Gets pods running on the node, filtered by priority
+    pass
+def pod.get_resource_requests():
+    # Gets the total resource requests for a pod
+    pass
+def select_best_preemption_candidate(candidates):
+    # Logic to choose which preemption candidate is best
+    pass
+def trigger_eviction(pods):
+    # API call to initiate pod eviction
+    pass
+def assign_pod_to_node(pod, node):
+    # API call to bind the pod to a node
+    pass
+def mark_pod_for_scheduling_after_preemption(pod, node):
+    # Indicates the pod should be scheduled on this node once resources are available
+    pass
