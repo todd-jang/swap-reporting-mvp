@@ -1,0 +1,99 @@
+# tain_bat/batch_processor.py
+
+# from common.db_manager import get_data_for_batch_processing # DB에서 데이터 로드 (개념적)
+# from tain_bat.batch_anomaly_checker import perform_batch_anomaly_check # 배치 이상 탐지 호출
+# from reporting_service.report_generator import generate_ktfc_report # 보고서 생성 호출 (개념적)
+# from reporting_service.report_transmitter import send_report_to_ktfc # 보고서 전송 호출 (개념적)
+
+# --- 개념적인 함수 (실제 로직 대신 시뮬레이션) ---
+def get_data_for_batch_processing(date_range: tuple) -> list:
+    """주어진 날짜 범위의 배치 처리 대상 데이터를 DB에서 로드."""
+    print(f"[BatchProcessor] 배치 데이터 로드 시작 ({date_range})...")
+    # TODO: 실제 DB에서 해당 날짜 범위의 처리 대상 데이터 조회 로직 구현
+    # 예: db.query("SELECT * FROM raw_swap_data WHERE process_status='pending' AND date BETWEEN %s AND %s", params=date_range)
+
+    # 가상 데이터 로드 시뮬레이션 (common.data_models.SwapRecord 형태 딕셔너리 목록)
+    num_records = random.randint(100, 500) # 배치 처리할 레코드 수 시뮬레이션
+    batch_data = []
+    for i in range(num_records):
+         batch_data.append({
+             "unique_transaction_identifier": f"UTI_BATCH_SIM_{generate_unique_id()}_{i}",
+             "notional_value_1": random.uniform(1e5, 1e7),
+             "asset_class": random.choice(["IR", "FX"]),
+             "ai_prediction_label": random.choice(["정상", "이상치", None]), # AI 결과가 있을 수도 없을 수도
+             "manual_review_status": random.choice(["Pending", "Approved", "NotNeeded"]),
+             # ... 기타 필드
+         })
+    print(f"[BatchProcessor] 배치 데이터 로드 완료 ({len(batch_data)} 레코드).")
+    return batch_data
+
+def perform_batch_anomaly_check(batch_data: list):
+    """로드된 배치 데이터에 대한 이상 탐지 실행."""
+    print(f"[BatchProcessor] 배치 이상 탐지 시작 ({len(batch_data)} 레코드)...")
+    # TODO: AI Inference Service를 호출하거나, 배치 이상 탐지 로직(batch_anomaly_checker.py) 호출
+    # 예: batch_anomaly_checker.run_checks(batch_data)
+    # 이 과정에서 각 레코드에 AI 이상치 점수/라벨이 추가/업데이트됨.
+    print(f"[BatchProcessor] 배치 이상 탐지 완료.")
+
+
+def generate_ktfc_report(processed_data: list) -> str:
+    """처리된 데이터로 KTFC 보고서 내용 생성."""
+    print(f"[BatchProcessor] KTFC 보고서 생성 시작 ({len(processed_data)} 레코드)...")
+    # TODO: reporting_service.report_generator 모듈의 함수 호출
+    # 예: report_content = reporting_service.report_generator.generate_ktfc_format(processed_data)
+    print(f"[BatchProcessor] KTFC 보고서 생성 완료.")
+    return "SIMULATED KTFC REPORT CONTENT" # 가상 보고서 내용
+
+
+def send_report_to_ktfc(report_content: str):
+    """생성된 보고서 내용을 KTFC로 전송."""
+    print(f"[BatchProcessor] KTFC 보고서 전송 시작 (크기: {len(report_content)})...")
+    # TODO: reporting_service.report_transmitter 모듈의 함수 호출 또는 Vo fep 연동 로직 구현
+    # 예: reporting_service.report_transmitter.transmit(report_content, target='KTFC')
+    print(f"[BatchProcessor] KTFC 보고서 전송 완료.")
+
+def generate_unique_id(): # common.utils 에서 임포트한다고 가정
+     return random.randint(10000, 99999)
+
+
+# --- 배치 처리 메인 로직 ---
+def run_daily_batch_processing(processing_date: datetime.date):
+    """
+    지정된 날짜의 데이터에 대한 일별 배치 처리를 실행합니다.
+    Scheduler에 의해 호출될 수 있습니다.
+    """
+    print(f"\n>>> 배치 처리 시작: {processing_date} 데이터 <<<")
+
+    # 1. 배치 처리 대상 데이터 로드
+    date_range = (datetime.datetime.combine(processing_date, datetime.time.min),
+                  datetime.datetime.combine(processing_date, datetime.time.max))
+    batch_data = get_data_for_batch_processing(date_range)
+
+    if not batch_data:
+        print(f"  - 처리할 데이터가 없습니다 ({processing_date}). 배치 처리 종료.")
+        return
+
+    # 2. 데이터 변환, 집계, 유효성 검증 등 배치 로직 수행 (TODO)
+    processed_data = batch_data # 예시: 로드된 데이터를 그대로 사용
+
+    # 3. AI 기반 배치 이상 탐지 실행
+    perform_batch_anomaly_check(processed_data)
+    # 이 함수 호출 내부에서 이상 탐지 결과가 데이터에 업데이트되거나 별도 기록됩니다.
+
+    # 4. KTFC 보고서 생성 (처리된 데이터 기반)
+    ktfc_report_content = generate_ktfc_report(processed_data)
+
+    # 5. KTFC 보고서 전송
+    send_report_to_ktfc(ktfc_report_content)
+
+    # TODO: 배치 처리 완료 상태 업데이트, 로그 기록 등 후처리
+
+    print(f">>> 배치 처리 완료: {processing_date} 데이터 <<<")
+
+
+# --- 실행 예시 ---
+if __name__ == "__main__":
+     # Scheduler가 이 함수를 호출하는 것을 시뮬레이션
+     # run_daily_batch_processing(datetime.date.today() - datetime.timedelta(days=1)) # 전날 데이터 처리
+     print("batch_processor.py 파일은 배치 처리 실행 로직을 정의합니다.")
+     print("실제 실행은 scheduler 등에 의해 트리거됩니다.")
