@@ -1,0 +1,28 @@
+# UI (TainWeb - Frontend JavaScript 또는 Python 웹 프레임워크)
+
+async function displayAnomalyTrendChart() {
+    // 백엔드 API로부터 일별 이상치 카운트 시계열 데이터를 가져옴
+    const response = await fetch('/api/anomaly/daily-count-timeseries');
+    const timeSeriesData = await response.json(); // 예: [{ date: '2023-01-01', count: 15 }, { date: '2023-01-02', count: 20 }, ...]
+
+    // 차트 라이브러리 (Chart.js, Plotly, D3.js 등)를 사용하여 데이터를 시각화
+    renderLineChart('anomalyTrendChartCanvas', timeSeriesData, {
+        xAccessor: d => new Date(d.date),
+        yAccessor: d => d.count,
+        title: '일별 이상치 발생 건수 추이',
+        yLabel: '이상치 건수'
+    });
+}
+
+async function displayModelPerformanceChart(modelName) {
+    // 백엔드 API로부터 모델 성능 지표 시계열 데이터를 가져옴
+    const response = await fetch(`/api/model/${modelName}/performance-timeseries`);
+    const performanceData = await response.json(); // 예: [{ date: '2023-01-07', roc_auc: 0.85 }, { date: '2023-01-14', roc_auc: 0.88 }, ...]
+
+    renderLineChart('modelPerformanceChartCanvas', performanceData, {
+        xAccessor: d => new Date(d.date),
+        yAccessor: d => d.roc_auc,
+        title: `${modelName} ROC AUC 추이`,
+        yLabel: 'ROC AUC'
+    });
+}
