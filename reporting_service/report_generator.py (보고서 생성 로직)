@@ -1,0 +1,99 @@
+# reporting_service/report_generator.py
+
+# from common.db_manager import get_data_for_report # DB에서 보고 대상 데이터 로드 (개념적)
+# from common.utils import convert_to_ktfc_report_format # KTFC 형식 변환 유틸리티 사용
+# from common.data_models import AnomalyReport # 이상 보고서 모델 사용
+
+import datetime
+from typing import List, Dict, Any
+
+# --- 보고서 생성 로직 ---
+def generate_ktfc_report(report_date: datetime.date) -> str:
+    """
+    지정된 날짜에 대한 KTFC 보고서 내용을 생성합니다.
+    """
+    print(f"\n[ReportGenerator] KTFC 보고서 생성 시작 ({report_date})...")
+    # 1. 보고 대상 데이터 로드
+    # date_range = (datetime.datetime.combine(report_date, datetime.time.min),
+    #               datetime.datetime.combine(report_date, datetime.time.max))
+    # report_data = get_data_for_report(date_range, report_type='KTFC') # DB 조회
+
+    # 가상 데이터 로드 시뮬레이션
+    report_data = []
+    num_records = random.randint(50, 200)
+    for i in range(num_records):
+         report_data.append({
+             "unique_transaction_identifier": f"UTI_REPORT_SIM_{generate_unique_id()}_{i}",
+             "reporting_counterparty_lei": "LEI_REPORT_OUR_SIM",
+             # ... 기타 보고서 필드
+         })
+    print(f"  - 보고 대상 데이터 로드 완료 ({len(report_data)} 레코드).")
+
+
+    if not report_data:
+        print("  - 보고할 데이터가 없습니다. 빈 보고서 내용 반환.")
+        return ""
+
+    # 2. KTFC 보고서 형식으로 변환
+    report_content = convert_to_ktfc_report_format(report_data) # common.utils 의 함수 사용
+
+    print(f"[ReportGenerator] KTFC 보고서 생성 완료 (크기: {len(report_content)}).")
+    return report_content
+
+
+def generate_internal_anomaly_report(date_range: tuple) -> AnomalyReport:
+    """
+    지정된 날짜 범위의 이상 거래에 대한 내부 보고서를 생성합니다.
+    """
+    print(f"\n[ReportGenerator] 내부 이상 보고서 생성 시작 ({date_range})...")
+    # 1. 이상 거래 데이터 로드 (AI 플래그 또는 수동 검토 결과 기준)
+    # anomalous_records = get_data_for_report(date_range, report_type='Anomaly') # DB 조회
+
+    # 가상 이상 거래 로드 시뮬레이션
+    anomalous_records = []
+    num_anomalies = random.randint(5, 20)
+    for i in range(num_anomalies):
+         anomalous_records.append({
+              "unique_transaction_identifier": f"UTI_ANOMALY_REPORT_SIM_{generate_unique_id()}_{i}",
+              "ai_anomaly_score": random.uniform(-1.0, -0.5),
+              "manual_review_status": random.choice(["Pending", "Approved"]),
+              # ... 기타 필드
+         })
+    print(f"  - 이상 거래 데이터 로드 완료 ({len(anomalous_records)} 레코드).")
+
+
+    # 2. 이상 분석 요약 생성 (TODO: 실제 분석 로직 필요)
+    analysis_summary = f"지정 기간 ({date_range}) 동안 총 {len(anomalous_records)} 건의 잠재적/확정 이상 거래가 탐지되었습니다."
+
+    # 3. AnomalyReport 모델 생성 및 반환
+    report = AnomalyReport(
+        report_id=generate_report_id('ANOMALY_INTERNAL'), # common.utils 의 함수 사용
+        timestamp=datetime.datetime.utcnow(),
+        anomalous_records=anomalous_records, # common.data_models 의 SwapRecord 리스트 예상
+        analysis_summary=analysis_summary,
+    )
+
+    print(f"[ReportGenerator] 내부 이상 보고서 생성 완료 (ID: {report.report_id}).")
+    return report
+
+# TODO: 다른 보고서 생성 함수 추가 (누적 보고서 등)
+
+def generate_unique_id(): # common.utils 에서 임포트한다고 가정
+     return random.randint(10000, 99999)
+
+def convert_to_ktfc_report_format(data): # common.utils 에서 임포트한다고 가정
+    return f"SIMULATED KTFC REPORT WITH {len(data)} RECORDS"
+
+def generate_report_id(prefix): # common.utils 에서 임포트한다고 가정
+     return f"{prefix}_{random.randint(1000, 9999)}"
+
+
+# --- 실행 예시 ---
+if __name__ == "__main__":
+     # 배치 처리에서 호출하는 것을 시뮬레이션
+     # generate_ktfc_report(datetime.date.today() - datetime.timedelta(days=1))
+
+     # 내부 분석에서 호출하는 것을 시뮬레이션
+     # generate_internal_anomaly_report((datetime.date.today() - datetime.timedelta(days=7), datetime.date.today()))
+     print("report_generator.py 파일은 보고서 생성 로직을 정의합니다.")
+     print("실제 실행은 tain_bat 또는 scheduler 등에 의해 트리거됩니다.")
