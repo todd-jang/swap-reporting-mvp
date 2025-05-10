@@ -1,0 +1,59 @@
+# deployment/kubernetes/alerting-service.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alerting-service-deployment
+  labels:
+    app: alerting-service
+spec:
+  replicas: 1 # 또는 필요에 따라 확장
+  selector:
+    matchLabels:
+      app: alerting-service
+  template:
+    metadata:
+      labels:
+        app: alerting-service
+    spec:
+      # 알림은 중요도가 높을 수 있으나, 알림 발송 자체의 컴퓨팅 부하는 낮음
+      # priorityClassName: high-priority-alerting # 예시 PriorityClass 이름
+
+      containers:
+      - name: alerting-service
+        image: your_docker_registry/alerting-service:latest # Alerting Service Docker 이미지 경로
+        # TODO: Alerting Service의 메인 실행 명령어 또는 Entrypoint 설정
+        # command: ["python", "alerting_service/app.py"] # API 서버 형태일 경우
+
+        env:
+        # 알림 발송 채널 설정 (이메일 SMTP 정보, 메신저 API 키 등)
+        # - name: EMAIL_SMTP_SERVER
+        #   valueFrom:
+        #     secretKeyRef:
+        #       name: alerting-secrets
+        #       key: smtp_server
+
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+
+          limits:
+            cpu: "300m"
+            memory: "512Mi"
+
+        # TODO: Readiness Probe, Liveness Probe 설정
+
+---
+# Alerting Service를 위한 Service (클러스터 내부 통신용)
+apiVersion: v1
+kind: Service
+metadata:
+  name: alerting-service # TainOn, TainBat, 모니터링 등에서 이 Service Name으로 접근
+spec:
+  selector:
+    app: alerting-service
+  ports:
+  - protocol: TCP
+    port: 8004 # 예시 포트
+    targetPort: 8004
