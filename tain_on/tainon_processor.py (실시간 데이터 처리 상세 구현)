@@ -127,6 +127,31 @@ async def process_realtime_swap_data(raw_data: dict): # raw_data 는 파싱된 d
 
     print(f">>> TainOn Processor: 처리 완료 ({record_id}) <<<")
 
+# pip install prometheus_client
+from prometheus_client import Counter, Summary, Gauge, start_http_server
+import threading # 메트릭 서버를 백그라운드 스레드로 실행하기 위해
+
+# --- 메트릭 정의 ---
+# 처리된 총 레코드 수 카운터
+PROCESSED_RECORDS_TOTAL = Counter('swap_records_processed_total', 'Total number of swap records processed')
+# 이상치로 탐지된 레코드 수 카운터
+ANOMALOUS_RECORDS_TOTAL = Counter('swap_records_anomalous_total', 'Total number of anomalous swap records detected')
+# 실시간 처리 지연 시간 서머리 (요청 시작부터 완료까지)
+REALTIME_PROCESSING_LATENCY_SECONDS = Summary('swap_realtime_processing_latency_seconds', 'Realtime swap record processing latency in seconds')
+# 현재 검토 대기 중인 이상치 건수 게이지
+ANOMALY_REVIEW_QUEUE_SIZE = Gauge('swap_anomaly_review_queue_size', 'Current number of anomalies pending review')
+# AI 추론 시간 서머리
+AI_INFERENCE_LATENCY_SECONDS = Summary('ai_inference_latency_seconds', 'AI model inference latency in seconds')
+# ... 필요한 다른 메트릭 정의
+
+# --- 메트릭 서버 시작 ---
+def start_metrics_server(port: int = 9000):
+    """메트릭 수집을 위한 HTTP 서버를 백그라운드 스레드로 시작."""
+    print(f"메트릭 서버 시작: 포트 {port}")
+    # start_http_server 함수는 기본적으로 블록킹되므로, 스레드로 실행
+    threading.Thread(target=start_http_server, args=(port,), daemon=True).start()
+    print("메트릭 서버 백그라운드 스레드 실행됨.")
+
 # --- TainOn 서비스 시작 시 모델 로딩 (필요시) ---
 # AI Inference Service를 호출하는 방식이라면 TainOn 자체에서 모델 로딩 불필요
 # async def load_tainon_models():
