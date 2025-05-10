@@ -1,0 +1,61 @@
+# deployment/kubernetes/reporting-service.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reporting-service-deployment
+  labels:
+    app: reporting-service
+spec:
+  replicas: 1 # 또는 필요에 따라 확장
+  selector:
+    matchLabels:
+      app: reporting-service
+  template:
+    metadata:
+      labels:
+        app: reporting-service
+    spec:
+      # 보고서 생성/전송은 중요한 작업이지만 실시간 처리보다는 낮은 우선순위
+      # priorityClassName: medium-priority-reporting # 예시 PriorityClass 이름
+
+      containers:
+      - name: reporting-service
+        image: your_docker_registry/reporting-service:latest # Reporting Service Docker 이미지 경로
+        # TODO: Reporting Service의 메인 실행 명령어 또는 Entrypoint 설정
+        # command: ["python", "reporting_service/app.py"] # API 서버 형태일 경우
+        # args: ["--run-reporter"] # 배치 호출 형태일 경우
+
+        env:
+        # DB 접속 정보 등 필요한 환경 변수
+        # 외부 시스템(KTFC/SDR) 전송 설정 (호스트, 사용자, 키 등)
+        # - name: KTFC_SFTP_HOST
+        #   valueFrom:
+        #     secretKeyRef: # Secret에서 중요한 정보 로드
+        #       name: reporting-secrets
+        #       key: ktfc_sftp_host
+
+        resources:
+          requests:
+            cpu: "300m"
+            memory: "512Mi"
+
+          limits:
+            cpu: "1"
+            memory: "2Gi" # 대규모 보고서 생성 시 메모리 사용량 주의
+
+        # TODO: Readiness Probe, Liveness Probe 설정
+
+---
+# Reporting Service를 위한 Service (클러스터 내부 통신용)
+apiVersion: v1
+kind: Service
+metadata:
+  name: reporting-service # TainBat 등에서 이 Service Name으로 접근
+spec:
+  selector:
+    app: reporting-service
+  ports:
+  - protocol: TCP
+    port: 8003 # 예시 포트
+    targetPort: 8003
