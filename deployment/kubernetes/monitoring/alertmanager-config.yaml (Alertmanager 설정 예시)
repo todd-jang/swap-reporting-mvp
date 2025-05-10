@@ -1,0 +1,20 @@
+# deployment/kubernetes/monitoring/alertmanager-config.yaml (Alertmanager 설정 예시)
+
+route:
+  # 기본 라우팅: 모든 알림을 default-receiver로 보냄
+  receiver: default-receiver
+  # 하위 라우팅 (특정 라벨에 따라 다른 수신자로 보낼 수 있음)
+  # routes:
+  # - match:
+  #     severity: critical
+  #   receiver: critical-alerts-receiver
+
+receivers:
+- name: default-receiver
+  email_configs: # 이메일 알림 설정
+  - to: 'it_ops@example.com'
+    send_resolved: true # 문제가 해결되었을 때 알림 보냄
+  # webhook_configs: # 메신저 API 연동 (Alerting Service가 이 웹훅을 받을 수 있음)
+  # - url: 'http://alerting-service:8004/receive_alert_webhook' # Alerting Service의 웹훅 엔드포인트 예시
+
+# TODO: 이메일 서버 설정 등 필요한 설정 추가
