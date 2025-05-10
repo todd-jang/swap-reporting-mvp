@@ -1,0 +1,56 @@
+# deployment/kubernetes/ml-training-service.yaml
+# 주기적 AI 모델 학습 작업을 실행하는 Deployment입니다. GPU 자원 요청이 핵심입니다. CronJob 형태로 관리될 수도 있습니다.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-training-service-deployment
+  labels:
+    app: ml-training-service
+spec:
+  replicas: 0 # 스케줄러에 의해 필요 시 Job 형태로 실행되거나, 주기적으로 Pod를 띄우고 작업 후 종료하는 방식
+             # 상시 대기 필요 없으면 replicas: 0 으로 설정하고 Job 또는 CronJob으로 관리
+
+  selector:
+    matchLabels:
+      app: ml-training-service
+  template:
+    metadata:
+      labels:
+        app: ml-training-service
+    spec:
+      # 학습 작업은 실시간 처리보다 낮은 우선순위 (자원 경합 시 선점 대상)
+      # priorityClassName: low-priority-training # 예시 PriorityClass 이름
+
+      containers:
+      - name: ml-training-service
+        image: your_docker_registry/ml-training-service:latest # ML Training Service Docker 이미지 경로
+        # 학습 워크플로우 시작 명령어
+        # command: ["python", "ml_training_service/training_workflow.py"]
+        args: ["--run-workflow"] # Entrypoint 스크립트에서 파싱
+
+        env:
+        # DB 접속 정보, 모델 저장소 경로 등 필요한 환경 변수
+        # - name: DATABASE_URL
+        #   value: "..."
+        # - name: MODEL_STORAGE_PATH
+        #   value: "/models"
+
+        resources:
+          requests: # 학습에 필요한 GPU, CPU, 메모리 요청
+            cpu: "4"
+            memory: "16Gi"
+            nvidia.com/gpu: "1" # Pod 당 1개의 GPU 요청 (고성능 GPU 타입 필요)
+
+          limits: # 학습에 필요한 자원 제한
+            cpu: "8"
+            memory: "32Gi" # 데이터 로딩 및 모델 크기 고려
+            nvidia.com/gpu: "1" # 요청과 동일 (GPU는 보통 요청=제한)
+
+        # GPU가 있는 노드에만 배포되도록 설정 필수
+      nodeSelector:
+        gpu.nvidia.com/present: "true" # NVIDIA GPU가 있는 노드에 배포
+        # 또는 특정 학습용 GPU 노드 풀의 레이블 사용
+
+      # 학습 완료 후 Pod 자동 종료 설정 (CronJob 또는 Job 사용 시 기본 동작)
+      # Deployment에서는 restartPolicy: OnFailure 또는 Never (Job/CronJob) 사용 고려
