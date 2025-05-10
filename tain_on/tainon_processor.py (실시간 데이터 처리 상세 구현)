@@ -1,0 +1,145 @@
+# tain_on/tainon_processor.py
+# 실시간 데이터를 받아 AI 추론을 호출하고 결과에 따라 조건부 처리를 수행하는 로직을 담습니다
+import datetime
+import random # 시뮬레이션용
+import numpy as np # 특징 벡터 처리를 위해
+# import requests # AI Inference Service API 호출 시 필요
+# from common.data_models import SwapRecord, AnomalyPredictionResult, ProcessedResult
+# from common.utils import preprocess_for_inference, is_business_hours # 전처리 및 시간 유틸리티
+# from reporting_service.report_generator import generate_immediate_anomaly_report # 즉시 보고서 생성 호출 (개념적)
+# from alerting_service.alert_sender import send_alert # 알림 발송 호출 (개념적)
+# from common.db_manager import save_processed_realtime_data, log_anomaly_for_review # DB 저장 및 검토 대상 로깅 (개념적)
+
+# --- 개념적인 AI Inference Service 호출 ---
+# 실제로는 HTTP/gRPC 클라이언트를 사용하여 ai_inference_service 의 API를 호출합니다.
+# 예시:
+# INFERENCE_API_URL = "http://ai-inference-service:8001/predict_anomaly"
+
+# --- 개념적인 함수 (실제 로직 대신 시뮬레이션) ---
+def preprocess_for_inference(data_record: dict) -> np.ndarray:
+    """실시간 레코드에서 AI 모델 입력에 맞는 특징 추출 및 전처리."""
+    # common.utils 에서 임포트한다고 가정
+    # print("  [TainOn] 특징 추출 및 전처리...")
+    return np.array([[random.random() * 100, random.random() * 10]]) # 가상 특징
+
+def predict_anomaly_with_ensemble_model(features: np.ndarray) -> dict: # AnomalyPredictionResult 모델의 딕셔너리 반환 시뮬레이션
+     """AI Inference Service API를 호출하여 이상치 예측."""
+     # print("  [TainOn] AI Inference Service 호출 시뮬레이션...")
+     # TODO: 실제 requests.post(INFERENCE_API_URL, json={"features": features.tolist()}) 호출
+     # response = requests.post(INFERENCE_API_URL, json={"features": features.tolist()}, timeout=5) # 타임아웃 설정
+     # response.raise_for_status()
+     # return response.json()
+
+     # 시뮬레이션 결과 생성 (AnomalyPredictionResult 모델 구조 따름)
+     score = random.uniform(-1.0, 1.0)
+     prediction_label = "이상치" if score < random.uniform(-0.7, -0.3) else "정상"
+     return {"model_name": "EnsembleAnomalyDetector", "score": score, "prediction_label": prediction_label}
+
+def is_business_hours(dt: datetime.datetime) -> bool:
+     # common.utils 에서 임포트한다고 가정
+     # print("  [TainOn] 업무 시간 확인...")
+     return 9 <= dt.hour < 15 # 간단한 업무 시간 체크 예시
+
+def generate_immediate_anomaly_report(record: dict, score: float):
+     # reporting_service.report_generator 에서 임포트한다고 가정
+     print(f"  [TainOn] 즉시 이상 보고서 생성 트리거 (레코드: {record.get('unique_transaction_identifier')}, 점수: {score:.4f})")
+     # TODO: reporting_service 의 함수 호출 또는 메시지 큐 발행
+
+def send_alert(severity: str, message: str):
+     # alerting_service.alert_sender 에서 임포트한다고 가정
+     print(f"  [TainOn] Alert 발송 트리거 (심각도: {severity}, 메시지: {message})")
+     # TODO: alerting_service 의 함수 호출 또는 메시지 큐 발행
+
+def save_processed_realtime_data(record: dict):
+     # common.db_manager 에서 임포트한다고 가정
+     print(f"  [TainOn] 처리된 실시간 데이터 DB 저장 (레코드: {record.get('unique_transaction_identifier')})...")
+     # TODO: DB INSERT 또는 UPDATE 로직 구현
+
+def log_anomaly_for_review(record: dict, prediction_result: dict):
+     # common.db_manager 에서 임포트한다고 가정
+     print(f"  [TainOn] 이상 탐지 데이터 검토 대상 로깅 (레코드: {record.get('unique_transaction_identifier')})...")
+     # TODO: 별도 테이블에 검토 대상 등록 로직 구현
+
+
+# --- 실시간 데이터 처리 메인 함수 ---
+# realtime_listener 에 의해 호출됩니다.
+async def process_realtime_swap_data(raw_data: dict): # raw_data 는 파싱된 dict 형태 가정
+    """
+    하나의 실시간 스왑 데이터 레코드를 처리하는 함수.
+    """
+    # common.data_models.SwapRecord 모델 사용을 위해 dict -> 모델 변환 또는 모델 직접 사용
+    # record = SwapRecord(**raw_data) # Pydantic 모델로 변환 예시 (필드 매핑 필요)
+    record = raw_data # 예시에서는 dict 그대로 사용
+
+    record_id = record.get('unique_transaction_identifier', 'N/A')
+    print(f"\n>>> TainOn Processor: 처리 시작 ({record_id}) <<<")
+
+    try:
+        # 1. 기본 유효성 검증 및 전처리 (TODO: 실제 로직 구현)
+        is_valid = True # 기본 검증 시뮬레이션
+        if not is_valid:
+            print(f"  - 기본 유효성 검증 실패: {record_id}")
+            # TODO: 오류 로깅, 알림, 실패 데이터 처리
+            save_processed_realtime_data(record) # 유효성 검증 실패 상태로 저장
+            return
+
+        # 2. AI 모델 추론을 위한 특징 추출
+        features = preprocess_for_inference(record)
+
+        # 3. AI Inference Service 호출 및 결과 처리
+        # AI 서비스 호출 시 예외 처리 필수
+        prediction_result = await predict_anomaly_with_ensemble_model(features) # async 호출 가정
+
+        is_anomaly = (prediction_result.get('prediction_label') == '이상치')
+        anomaly_score = prediction_result.get('score')
+
+        # record.ai_anomaly_score = anomaly_score # 데이터 모델에 AI 결과 반영
+        # record.ai_prediction_label = prediction_result.get('prediction_label')
+
+        print(f"  - AI 예측 결과: 라벨={prediction_result.get('prediction_label')}, 점수={anomaly_score:.4f}")
+
+
+        # 4. 최종 상태 결정 및 처리 (AI 결과 + 수동 검토 상태 등 고려)
+        # 최초 처리 시에는 AI 결과 기반으로 잠정적 상태 결정
+        final_status = "Processed_Normal"
+        if is_anomaly:
+            final_status = "Processed_Potential_Anomaly"
+            log_anomaly_for_review(record, prediction_result) # 이상 탐지 시 검토 대상 로깅
+
+
+        # 5. 데이터 저장 (AI 결과 및 최종 상태 포함)
+        save_processed_realtime_data(record)
+
+
+        # 6. 조건부 액션 트리거 (업무 시간 중 이상 탐지 등)
+        # if is_anomaly and is_business_hours(datetime.datetime.now()):
+        if is_anomaly: # 시뮬레이션 간소화
+             print("  - 이상 탐지됨. 즉시 액션 트리거.")
+             # 즉시 보고서 생성 (상세 이상 보고)
+             # generate_immediate_anomaly_report(record, anomaly_score)
+             # Alert 발송
+             send_alert("Warning", f"Swap anomaly detected for {record_id} (Score: {anomaly_score:.4f})")
+
+
+    except Exception as e:
+        print(f"--- TainOn Processor 오류 발생 ({record_id}): {e} ---")
+        # TODO: 오류 로깅, 알림 발송 (Critical), 실패 레코드 상태 업데이트 등
+
+    print(f">>> TainOn Processor: 처리 완료 ({record_id}) <<<")
+
+# --- TainOn 서비스 시작 시 모델 로딩 (필요시) ---
+# AI Inference Service를 호출하는 방식이라면 TainOn 자체에서 모델 로딩 불필요
+# async def load_tainon_models():
+#     print("TainOn Processor: 모델 로딩 시뮬레이션...")
+#     # pass # AI Inference Service 호출 방식이므로 여기서 모델 로딩 안 함
+
+# if __name__ == "__main__":
+#     # 테스트 또는 시뮬레이션 실행
+#     # import asyncio
+#     # async def simulate_realtime_processing():
+#     #      await load_tainon_models() # 필요시
+#     #      sample_data = [{'unique_transaction_identifier': 'SIM_RT_001', 'Feature_A': 10, 'Feature_B': 20}]
+#     #      for data in sample_data:
+#     #          await process_realtime_swap_data(data)
+#     # asyncio.run(simulate_realtime_processing())
+#     print("tainon_processor.py 파일은 실시간 데이터 처리 로직을 정의합니다.")
