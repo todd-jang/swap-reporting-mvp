@@ -1,0 +1,66 @@
+# deployment/kubernetes/tainbat.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tainbat-deployment
+  labels:
+    app: tainbat
+spec:
+  replicas: 1 # Scheduler 인스턴스는 보통 1개 (고가용성 구성 시 2개 이상)
+  selector:
+    matchLabels:
+      app: tainbat
+  template:
+    metadata:
+      labels:
+        app: tainbat
+    spec:
+      # 배치 처리는 실시간 처리보다 낮은 우선순위 설정
+      # priorityClassName: medium-priority-batch # 예시 PriorityClass 이름
+
+      containers:
+      - name: tainbat
+        image: your_docker_registry/tainbat:latest # TainBat 서비스 Docker 이미지 경로
+        # Scheduler 역할과 배치 처리 로직을 모두 수행하는 Pod (또는 Scheduler Pod, Worker Pod 분리 가능)
+        # command: ["python", "tain_bat/scheduler.py"] # Scheduler를 메인 프로세스로 실행
+        args: ["--run-scheduler"] # 스케줄러 실행 플래그 (Entrypoint 스크립트에서 파싱)
+
+        env:
+        # 다른 서비스 API URL 환경 변수
+        - name: AI_INFERENCE_API_URL
+          value: http://ai-inference-service:8001/predict_anomaly_batch
+        - name: REPORTING_SERVICE_URL
+          value: http://reporting-service:8003/generate_report # 예시
+        - name: ALERTING_SERVICE_URL
+          value: http://alerting-service:8004/send_alert # 예시
+        # DB 접속 정보 등
+
+        resources:
+          requests: # 요청 자원 (CPU, Memory) - AI 처리 자체는 AI Inference Service가 담당
+            cpu: "500m"
+            memory: "1Gi"
+            # GPU 자원 요청 안 함 (AI Inference Service 호출 방식)
+            # nvidia.com/gpu: "0"
+
+          limits: # 최대 사용 제한
+            cpu: "2"
+            memory: "4Gi" # 대규모 데이터 로딩/처리 시 Memory Limit 중요
+
+        # TODO: Readiness Probe, Liveness Probe 설정 (Scheduler 동작 확인 등)
+        # TODO: CronJob 형태로 배치 작업 자체를 관리하는 방식도 흔하게 사용됨
+
+---
+# TainBat 내부 또는 외부 호출을 위한 Service (필요시)
+# TainBat는 주로 외부(Scheduler, CronJob)에서 트리거되므로 Service 정의가 불필요할 수도 있습니다.
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: tainbat-service
+# spec:
+#   selector:
+#     app: tainbat
+#   ports:
+#   - protocol: TCP
+#     port: 8005 # 예시 포트 (내부 호출용)
+#     targetPort: 8005
