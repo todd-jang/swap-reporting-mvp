@@ -126,7 +126,8 @@ async def process_realtime_swap_data(raw_data: dict): # raw_data 는 파싱된 d
         # TODO: 오류 로깅, 알림 발송 (Critical), 실패 레코드 상태 업데이트 등
 
     print(f">>> TainOn Processor: 처리 완료 ({record_id}) <<<")
-
+#------------------------------------------------------------------------------------
+# Prometheus 클라이언트 라이브러리를 사용하여 커스텀 메트릭을 노출하는 부분을 추가
 # pip install prometheus_client
 from prometheus_client import Counter, Summary, Gauge, start_http_server
 import threading # 메트릭 서버를 백그라운드 스레드로 실행하기 위해
@@ -143,7 +144,7 @@ ANOMALY_REVIEW_QUEUE_SIZE = Gauge('swap_anomaly_review_queue_size', 'Current num
 # AI 추론 시간 서머리
 AI_INFERENCE_LATENCY_SECONDS = Summary('ai_inference_latency_seconds', 'AI model inference latency in seconds')
 # ... 필요한 다른 메트릭 정의
-
+#====================================================================
 # --- 메트릭 서버 시작 ---
 def start_metrics_server(port: int = 9000):
     """메트릭 수집을 위한 HTTP 서버를 백그라운드 스레드로 시작."""
