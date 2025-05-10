@@ -1,0 +1,33 @@
+# deployment/kubernetes/monitoring/alerting-rules.yml (Prometheus 규칙 예시)
+
+groups:
+- name: swap-reporting-alerts
+  rules:
+  - alert: HighAnomalyRate
+    expr: rate(swap_records_anomalous_total[5m]) / rate(swap_records_processed_total[5m]) * 100 > 5 # 지난 5분간 처리량 대비 이상치 비율이 5% 초과 시
+    for: 5m # 5분간 지속될 경우 알림
+    labels:
+      severity: Warning
+    annotations:
+      summary: "High anomaly rate detected in swap data processing"
+      description: "Anomaly rate is {{ $value }}% for the last 5 minutes."
+
+  - alert: BatchJobFailed
+    expr: batch_job_status{job_name="daily-report"} == 0 # 예시: 배치 작업 성공 지표가 0일 경우
+    for: 15m # 15분간 지속될 경우 알림
+    labels:
+      severity: Critical
+    annotations:
+      summary: "Daily Report Batch Job Failed"
+      description: "The daily report batch job failed or did not complete successfully."
+
+  - alert: HighGPUTemperature
+    expr: gpu_exporter_gpu_temp > 75 # GPU 온도가 75도 초과 시 (nvidia-dcgm-exporter 지표 사용)
+    for: 5m
+    labels:
+      severity: Warning
+    annotations:
+      summary: "High GPU temperature detected on node {{ $labels.instance }}"
+      description: "GPU temperature is {{ $value }} C on instance {{ $labels.instance }}."
+
+  # TODO: 다른 중요한 알림 규칙 추가 (컨테이너 재시작 빈번, 자원 사용률 임계값 초과 등)
