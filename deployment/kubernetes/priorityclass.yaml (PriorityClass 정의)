@@ -1,0 +1,60 @@
+# deployment/kubernetes/priorityclass.yaml
+
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: high-priority-realtime # 실시간 처리 워크로드용
+value: 1000000 # 높은 숫자일수록 우선순위 높음
+globalDefault: false
+description: "This priority class should be used for real-time swap processing pods."
+
+---
+
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: high-priority-alerting # 알림 워크로드용 (즉시성 요구)
+value: 900000
+globalDefault: false
+description: "This priority class should be used for critical alerting pods."
+
+---
+
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: medium-priority-batch # 배치 처리 워크로드용
+value: 500000
+globalDefault: false
+description: "This priority class should be used for batch processing pods."
+
+---
+
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: medium-priority-inference # AI 추론 워크로드용 (실시간 호출 가능)
+value: 550000 # 배치보다 약간 높게 설정 가능
+globalDefault: false
+description: "This priority class should be used for AI inference service pods."
+
+
+---
+
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: low-priority-training # AI 학습 워크로드용 (자원 경합 시 선점 대상)
+value: 100000
+globalDefault: false
+description: "This priority class should be used for AI model training pods."
+
+---
+
+# 기본 우선순위 (PriorityClass를 지정하지 않은 Pod에 적용)
+# apiVersion: scheduling.k8s.io/v1
+# kind: PriorityClass
+# metadata:
+#   name: default-priority
+# value: 0 # 기본값
+# globalDefault: true # 기본값으로 설정
