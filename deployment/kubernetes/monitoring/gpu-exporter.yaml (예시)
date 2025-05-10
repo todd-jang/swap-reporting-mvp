@@ -1,0 +1,48 @@
+# deployment/kubernetes/monitoring/gpu-exporter.yaml (예시)
+
+apiVersion: apps/v1
+kind: DaemonSet # 각 GPU 노드에 Pod가 하나씩 배포되도록
+metadata:
+  name: nvidia-dcgm-exporter
+  namespace: monitoring # 모니터링 네임스페이스에 배포
+spec:
+  selector:
+    matchLabels:
+      app: nvidia-dcgm-exporter
+  template:
+    metadata:
+      labels:
+        app: nvidia-dcgm-exporter
+    spec:
+      # GPU가 있는 노드에만 배포
+      nodeSelector:
+        gpu.nvidia.com/present: "true" # 또는 특정 GPU 노드 풀 레이블
+
+      tolerations: # 테인트된 노드에도 배포되도록 (선택 사항)
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+
+      containers:
+      - name: dcgm-exporter
+        image: nvidia/dcgm-exporter:2.4.7-2.7.0-ubuntu20.04 # 최신 이미지 사용
+        # image: nvcr.io/nvidia/k8s/dcgm-exporter:2.8.4-2.9.1-ubuntu22.04 # NGC 레지스트리
+        ports:
+        - containerPort: 9400 # 메트릭 노출 포트
+          name: metrics
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          # DCGM Exporter 자체는 GPU 사용 안 함
+          # nvidia.com/gpu: "0" # 명시적으로 0으로 설정 가능
+        securityContext:
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+
+      serviceAccountName: nvidia-dcgm-exporter # RBAC 설정 필요
+      # TODO: RBAC (Role-Based Access Control) 설정 YAML 필요
