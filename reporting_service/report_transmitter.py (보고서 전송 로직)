@@ -1,0 +1,93 @@
+# reporting_service/report_transmitter.py
+
+# import paramiko # SFTP 전송을 위해
+# import requests # API 전송을 위해
+# TODO: 설정 파일 등에서 전송 대상 정보 로드 (호스트, 포트, 사용자, 키/비밀번호, 엔드포인트 URL)
+
+# --- 개념적인 함수 (실제 로직 대신 시뮬레이션) ---
+def send_via_sftp(report_content: str, remote_path: str, sftp_config: dict):
+    """SFTP를 통해 보고서 내용을 전송."""
+    print(f"[ReportTransmitter] SFTP 전송 시작: 원격 경로 {remote_path}...")
+    # TODO: paramiko 등을 사용하여 SFTP 연결, 파일 쓰기, 연결 종료 로직 구현
+    # try:
+    #     transport = paramiko.Transport((sftp_config['host'], sftp_config['port']))
+    #     transport.connect(username=sftp_config['user'], password=sftp_config.get('password'), pkey=sftp_config.get('pkey'))
+    #     sftp = paramiko.SFTPClient.from_transport(transport)
+    #
+    #     # 보고서 내용을 파일로 쓰고 전송
+    #     with sftp.open(remote_path, 'w') as f:
+    #         f.write(report_content)
+    #
+    #     sftp.close()
+    #     transport.close()
+    #     print("  - SFTP 전송 성공.")
+    #     return True
+    # except Exception as e:
+    #     print(f"  - SFTP 전송 실패: {e}")
+    #     return False
+
+    # 시뮬레이션
+    print("  - SFTP 전송 성공 시뮬레이션.")
+    return True
+
+
+def send_via_api(report_content: str, api_url: str, api_config: dict):
+    """API 호출을 통해 보고서 내용을 전송."""
+    print(f"[ReportTransmitter] API 전송 시작: URL {api_url}...")
+    # TODO: requests 등을 사용하여 HTTP/HTTPS POST 요청 전송 로직 구현
+    # try:
+    #     headers = api_config.get('headers', {})
+    #     response = requests.post(api_url, data=report_content, headers=headers, timeout=30) # 타임아웃 설정
+    #     response.raise_for_status() # HTTP 오류 발생 시 예외 발생
+    #     print("  - API 전송 성공.")
+    #     return True
+    # except Exception as e:
+    #     print(f"  - API 전송 실패: {e}")
+    #     return False
+
+    # 시뮬레이션
+    print("  - API 전송 성공 시뮬레이션.")
+    return True
+
+
+# --- 보고서 전송 메인 함수 ---
+def transmit_report(report_content: str, target: str, report_id: str = None):
+    """
+    생성된 보고서 내용을 지정된 대상(KTFC, SDR 등)으로 전송합니다.
+    TainBat 또는 Report Generator에 의해 호출됩니다.
+    """
+    print(f"\n>>> 보고서 전송 시작: 대상 {target}, 보고서 ID {report_id} <<<")
+    # TODO: 대상(target)에 따라 적절한 전송 방식(SFTP, API) 및 설정 선택
+
+    is_success = False
+    if target == 'KTFC':
+        # TODO: KTFC 전송 설정 로드
+        # sftp_config = load_ktfc_sftp_config()
+        # remote_path = f"/upload/ktfc_report_{report_id}.csv" # 원격 파일 경로 규칙
+        remote_path = f"/upload/ktfc_report_sim.csv"
+        sftp_config = {} # 시뮬레이션
+        is_success = send_via_sftp(report_content, remote_path, sftp_config)
+    elif target == 'CFTC_SDR_A':
+        # TODO: CFTC SDR A 전송 설정 로드 (SFTP 또는 API)
+        # api_config = load_cftc_sdr_api_config('A')
+        # api_url = api_config['url']
+        api_url = "http://cftc-sdr-a.com/upload"
+        api_config = {} # 시뮬레이션
+        is_success = send_via_api(report_content, api_url, api_config)
+    # TODO: 다른 대상 추가
+
+    if is_success:
+        print(f">>> 보고서 전송 성공: 대상 {target}, 보고서 ID {report_id} <<<")
+        # TODO: DB에 전송 상태 기록 (성공)
+    else:
+        print(f">>> 보고서 전송 실패: 대상 {target}, 보고서 ID {report_id} <<<")
+        # TODO: DB에 전송 상태 기록 (실패), 알림 발송
+
+    return is_success
+
+
+# --- 실행 예시 ---
+if __name__ == "__main__":
+     # transmit_report("Sample KTFC Report Content", "KTFC", report_id="DAILY_20231026_001")
+     # transmit_report("Sample CFTC SDR Report Content", "CFTC_SDR_A", report_id="SWAP_TRADE_12345")
+     print("report_transmitter.py 파일은 보고서 전송 로직을 정의합니다.")
