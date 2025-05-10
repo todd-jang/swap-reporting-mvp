@@ -121,7 +121,7 @@ async def process_realtime_swap_data(raw_data: dict): # raw_data 는 파싱된 d
              send_alert("Warning", f"Swap anomaly detected for {record_id} (Score: {anomaly_score:.4f})")
 
           PROCESSED_RECORDS_TOTAL.inc() # 처리된 레코드 수 증가
-#===================== # --- 애플리케이션 코드 내에서 메트릭 업데이트 예시 ---
+#===================== # 7. 애플리케이션 코드 내에서 메트릭 업데이트 예시 
         """if is_anomaly:
             ANOMALOUS_RECORDS_TOTAL.inc() # 이상치 카운트 증가
             # TODO: ANOMALY_REVIEW_QUEUE_SIZE.inc() # 검토 큐에 추가될 때 증가
