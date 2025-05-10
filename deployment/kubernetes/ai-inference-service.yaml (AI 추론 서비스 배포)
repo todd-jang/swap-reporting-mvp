@@ -1,0 +1,69 @@
+# deployment/kubernetes/ai-inference-service.yaml
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-inference-service-deployment
+  labels:
+    app: ai-inference-service
+spec:
+  replicas: 2 # 추론 부하에 따라 인스턴스 수 (HPA로 자동 조절 가능)
+  selector:
+    matchLabels:
+      app: ai-inference-service
+  template:
+    metadata:
+      labels:
+        app: ai-inference-service
+    spec:
+      # 추론 서비스는 실시간 처리에 의해 호출될 수 있으므로 우선순위 설정 고려
+      # priorityClassName: medium-priority-inference # 예시 PriorityClass 이름
+
+      containers:
+      - name: ai-inference-service
+        image: your_docker_registry/ai-inference-service:latest # AI Inference Service Docker 이미지 경로
+        ports:
+        - containerPort: 8001 # FastAPI 서비스 포트 (예시)
+        # TODO: 필요한 환경 변수 설정 (예: 모델 파일 경로, 설정 파일 경로)
+        # env:
+        #   - name: MODEL_PATH
+        #     value: "/app/models/ensemble_v1.pkl"
+
+        resources:
+          requests: # 요청 자원 (GPU 포함)
+            cpu: "2"
+            memory: "4Gi"
+            nvidia.com/gpu: "1" # Pod 당 1개의 GPU 요청 (또는 MIG 설정 시 특정 GPU 자원 타입 요청)
+
+          limits: # 최대 사용 제한 (GPU 포함)
+            cpu: "4" # 요청보다 더 많이 사용 가능하도록 (Burstable QoS)
+            memory: "8Gi"
+            nvidia.com/gpu: "1" # 요청과 동일 (GPU는 보통 요청=제한)
+
+
+        # TODO: Readiness Probe, Liveness Probe 설정
+        # readinessProbe:
+        #   httpGet:
+        #     path: /health # AI Inference Service 헬스체크 엔드포인트 (FastAPI 기본 제공 또는 구현)
+        #     port: 8001
+        #   initialDelaySeconds: 10 # 모델 로딩 시간 고려
+        #   periodSeconds: 15
+
+      # GPU가 있는 노드에만 배포되도록 설정 필수
+      nodeSelector:
+        gpu.nvidia.com/present: "true" # NVIDIA GPU가 있는 노드에 배포 (레이블은 클러스터 설정에 따름)
+        # 또는 특정 GPU 노드 풀의 레이블 사용
+
+---
+# AI Inference Service를 위한 Service (클러스터 내부 통신용)
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-inference-service # TainOn 등에서 이 Service Name으로 접근
+spec:
+  selector:
+    app: ai-inference-service
+  ports:
+  - protocol: TCP
+    port: 8001 # Service 포트
+    targetPort: 8001 # Pod 컨테이너 포트
