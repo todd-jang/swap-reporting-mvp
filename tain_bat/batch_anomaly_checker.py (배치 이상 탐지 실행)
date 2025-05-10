@@ -1,0 +1,116 @@
+# tain_bat/batch_anomaly_checker.py
+
+import datetime
+import numpy as np # 특징 벡터 처리를 위해
+# import requests # AI Inference Service API 호출 시 필요 (배치 API)
+# from common.db_manager import get_batch_data_for_anomaly_check, update_anomaly_results_in_db # DB 접근 (개념적)
+# from common.utils import preprocess_for_inference # 전처리 유틸리티 사용
+# from common.data_models import AnomalyPredictionResult, BatchInferenceRequest # 데이터 모델 사용
+
+# --- 개념적인 AI Inference Service 배치 API 호출 ---
+# 예시:
+# BATCH_INFERENCE_API_URL = "http://ai-inference-service:8001/predict_anomaly_batch"
+
+# --- 개념적인 함수 (실제 로직 대신 시뮬레이션) ---
+def get_batch_data_for_anomaly_check(date_range: tuple) -> list: # SwapRecord 딕셔너리 목록 반환 시뮬레이션
+     # common.db_manager 에서 임포트한다고 가정
+     print(f"[BatchAnomalyChecker] 배치 이상 탐지 대상 데이터 로드 ({date_range})...")
+     # TODO: DB에서 배치 이상 탐지 대상 데이터 조회 (아직 AI 플래그 안 된 데이터 등)
+     # 예: db.query("SELECT * FROM processed_swap_data WHERE ai_prediction_label IS NULL AND date BETWEEN %s AND %s", params=date_range)
+
+     # 가상 데이터 로드 시뮬레이션
+     num_records = random.randint(1000, 5000) # 배치 크기 시뮬레이션
+     batch_data = []
+     for i in range(num_records):
+          batch_data.append({
+              "unique_transaction_identifier": f"UTI_BATCH_ANOMALY_SIM_{generate_unique_id()}_{i}",
+              "notional_value_1": random.uniform(1e5, 1e7),
+              "price": random.uniform(0.001, 0.05),
+               # ... 기타 특징 추출에 필요한 필드
+          })
+     print(f"  - 로드 완료: {len(batch_data)} 레코드.")
+     return batch_data
+
+def update_anomaly_results_in_db(results: List[dict]): # AnomalyPredictionResult 딕셔너리 목록
+     # common.db_manager 에서 임포트한다고 가정
+     print(f"[BatchAnomalyChecker] 이상 탐지 결과 DB 업데이트 ({len(results)} 레코드)...")
+     # TODO: DB에 AI 예측 결과 (점수, 라벨) 벌크 업데이트 로직 구현
+     # 예: db.bulk_update_anomaly_flags(results)
+     print("  - DB 업데이트 완료.")
+
+def preprocess_for_inference(record: dict) -> np.ndarray:
+    # common.utils 에서 임포트한다고 가정
+    return np.array([random.random() * 10, random.random() * 5]) # 가상 특징
+
+def predict_anomaly_with_ensemble_model_batch(batch_features: np.ndarray) -> List[dict]: # AnomalyPredictionResult 딕셔너리 목록 반환 시뮬레이션
+     """AI Inference Service 배치 API를 호출하여 이상치 예측."""
+     print(f"  [BatchAnomalyChecker] AI Inference Service 배치 호출 시뮬레이션 ({len(batch_features)} 건)...")
+     # TODO: 실제 requests.post(BATCH_INFERENCE_API_URL, json={"records": [...]}) 호출
+     # batch_request_data = BatchInferenceRequest(records=[InferenceRequest(record_id=str(i), features=features.tolist()) for i, features in enumerate(batch_features)])
+     # response = requests.post(BATCH_INFERENCE_API_URL, json=batch_request_data.model_dump())
+     # response.raise_for_status()
+     # return response.json() # List[AnomalyPredictionResult] 형태의 딕셔너리 리스트 예상
+
+     # 시뮬레이션 결과 생성
+     results = []
+     for i in range(len(batch_features)):
+          score = random.uniform(-1.0, 1.0)
+          prediction_label = "이상치" if score < random.uniform(-0.7, -0.3) else "정상"
+          results.append({"model_name": "EnsembleAnomalyDetector", "score": score, "prediction_label": prediction_label})
+     print(f"  - 배치 추론 완료 시뮬레이션 ({len(results)} 결과).")
+     return results
+
+def generate_unique_id(): # common.utils 에서 임포트한다고 가정
+     return random.randint(10000, 99999)
+
+
+# --- 배치 이상 탐지 메인 로직 ---
+# Scheduler에 의해 호출됩니다.
+def run_batch_anomaly_check(date_range: tuple):
+    """
+    지정된 날짜 범위의 데이터에 대해 배치 이상 탐지를 실행합니다.
+    """
+    print(f"\n>>> 배치 이상 탐지 시작: 데이터 범위 {date_range} <<<")
+
+    # 1. 배치 이상 탐지 대상 데이터 로드
+    batch_data = get_batch_data_for_anomaly_check(date_range)
+
+    if not batch_data:
+        print("  - 배치 이상 탐지 대상 데이터가 없습니다. 배치 이상 탐지 종료.")
+        return
+
+    # 2. 추론을 위한 특징 추출 (배치 처리)
+    # 각 레코드에 대해 전처리 함수 호출
+    batch_features = np.array([preprocess_for_inference(record) for record in batch_data])
+    # features = [preprocess_for_inference(record) for record in batch_data] # 리스트 형태로도 가능
+
+    # 3. AI Inference Service 배치 API 호출
+    # 이 함수 호출 내부에서 AI 추론 결과가 반환됩니다.
+    prediction_results = predict_anomaly_with_ensemble_model_batch(batch_features)
+
+    # 4. 이상 탐지 결과 DB 업데이트
+    # 반환된 예측 결과를 DB에 저장 (어떤 레코드의 결과인지 매핑 필요 - 요청 시 record_id 포함 등)
+    # 예시에서는 결과 순서가 요청 순서와 같다고 가정
+    results_to_update = []
+    for i, record in enumerate(batch_data):
+         # 결과와 원본 레코드 매핑
+         result = prediction_results[i]
+         results_to_update.append({
+             'unique_transaction_identifier': record.get('unique_transaction_identifier'),
+             'ai_anomaly_score': result.get('score'),
+             'ai_prediction_label': result.get('prediction_label'),
+             # TODO: 업데이트 필요한 다른 필드 추가
+         })
+
+    update_anomaly_results_in_db(results_to_update)
+
+
+    print(f">>> 배치 이상 탐지 완료 ({len(batch_data)} 레코드 처리). <<<")
+
+
+# --- 실행 예시 ---
+if __name__ == "__main__":
+     # Scheduler가 이 함수를 호출하는 것을 시뮬레이션
+     # run_batch_anomaly_check((datetime.date.today() - datetime.timedelta(days=1), datetime.date.today())) # 전날 데이터 범위
+     print("batch_anomaly_checker.py 파일은 배치 이상 탐지 실행 로직을 정의합니다.")
+     print("실제 실행은 scheduler 등에 의해 트리거됩니다.")
