@@ -1,0 +1,97 @@
+# alerting_service/alert_sender.py
+
+# import smtplib # 이메일 발송을 위해
+# from email.mime.text import MIMEText
+# import requests # 메신저 API 발송을 위해
+# TODO: 설정 파일 등에서 알림 수신자 정보, 발송 채널 설정 로드
+
+# --- 개념적인 함수 (실제 로직 대신 시뮬레이션) ---
+def send_email_alert(subject: str, body: str, recipients: List[str], email_config: dict):
+    """이메일로 알림 발송."""
+    print(f"[AlertSender] 이메일 알림 발송 시뮬레이션: 제목 '{subject}', 수신자 {recipients}...")
+    # TODO: 실제 smtplib 등을 사용하여 이메일 발송 로직 구현
+    # try:
+    #     server = smtplib.SMTP(email_config['smtp_server'], email_config['smtp_port'])
+    #     server.starttls() # TLS 보안 연결
+    #     server.login(email_config['sender_email'], email_config['sender_password'])
+    #
+    #     msg = MIMEText(body)
+    #     msg['Subject'] = subject
+    #     msg['From'] = email_config['sender_email']
+    #     msg['To'] = ", ".join(recipients)
+    #
+    #     server.sendmail(email_config['sender_email'], recipients, msg.as_string())
+    #     server.quit()
+    #     print("  - 이메일 발송 성공.")
+    #     return True
+    # except Exception as e:
+    #     print(f"  - 이메일 발송 실패: {e}")
+    #     return False
+
+    # 시뮬레이션
+    print("  - 이메일 발송 성공 시뮬레이션.")
+    return True
+
+
+def send_messenger_alert(message: str, recipients: List[str], messenger_config: dict):
+    """메신저 API를 통해 알림 발송."""
+    print(f"[AlertSender] 메신저 알림 발송 시뮬레이션: 메시지 '{message}', 수신자 {recipients}...")
+    # TODO: 실제 메신저(Slack, Teams 등) API 호출 로직 구현 (API 키, 채널/사용자 ID 사용)
+    # try:
+    #     api_url = messenger_config['api_url']
+    #     payload = {'text': message, 'channel': ','.join(recipients)} # 예시 payload (메신저마다 다름)
+    #     headers = {'Authorization': f'Bearer {messenger_config["api_token"]}'} # 예시 헤더
+    #     response = requests.post(api_url, json=payload, headers=headers)
+    #     response.raise_for_status()
+    #     print("  - 메신저 발송 성공.")
+    #     return True
+    # except Exception as e:
+    #     print(f"  - 메신저 발송 실패: {e}")
+    #     return False
+
+    # 시뮬레이션
+    print("  - 메신저 발송 성공 시뮬레이션.")
+    return True
+
+
+# --- 알림 발송 메인 함수 ---
+def send_alert(severity: str, message: str, related_info: Dict[str, Any] = None):
+    """
+    지정된 심각도와 메시지로 담당자에게 알림을 발송합니다.
+    TainOn, TainBat, 모니터링 시스템 등에서 호출됩니다.
+    """
+    print(f"\n>>> 알림 발송 시작: 심각도 {severity}, 메시지 '{message}' <<<")
+    # TODO: 심각도 및 알림 타입에 따라 적절한 수신자 그룹 및 발송 채널 선택
+    # TODO: 설정 파일 등에서 수신자 및 채널 정보 로드
+    recipients = ["compliance_team@example.com", "it_ops@example.com"] # 예시 수신자
+    channels = ["email", "messenger"] # 예시 채널
+
+    subject = f"[Swap Reporting System Alert - {severity}] {message[:50]}..." # 이메일 제목 예시
+    body = f"심각도: {severity}\n메시지: {message}\n"
+    if related_info:
+        body += f"관련 정보: {related_info}\n" # 관련 정보 추가
+
+    is_success_email = False
+    is_success_messenger = False
+
+    if "email" in channels:
+        email_config = {} # 시뮬레이션 설정
+        is_success_email = send_email_alert(subject, body, recipients, email_config)
+
+    if "messenger" in channels:
+         messenger_config = {} # 시뮬레이션 설정
+         is_success_messenger = send_messenger_alert(message, recipients, messenger_config)
+
+    if is_success_email or is_success_messenger:
+        print(f">>> 알림 발송 완료: 최소 한 개 채널 성공 <<<")
+        return True
+    else:
+        print(f">>> 알림 발송 실패: 모든 채널 실패 <<<")
+        return False
+
+
+# --- 실행 예시 ---
+if __name__ == "__main__":
+     # send_alert("Critical", "Batch Processing Failed for Yesterday's Data!")
+     # send_alert("Warning", "High number of anomalies detected in real-time stream.", related_info={"count": 55, "time_window": "last 1 hour"})
+     print("alert_sender.py 파일은 알림 발송 로직을 정의합니다.")
